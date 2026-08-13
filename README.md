@@ -8,6 +8,8 @@
 - **非破坏**：不修改任何官方文件（`dist/cli.js`、`node_modules` 均保持原样），官方更新后自动适配
 - **覆盖范围**：设置界面（`/settings`）的 tab、分组、设置项名称、选项与描述
 
+> 📖 **快速上手**：完整的安装、验证、日常使用与故障排查见 [INSTALL.md](INSTALL.md)。
+
 ## 效果
 
 | 项目 | 汉化前 | 汉化后 |
@@ -109,3 +111,7 @@ zhomp/
 ## 许可
 
 [MIT](LICENSE)
+
+## 仓库
+
+[https://github.com/vanness30214/zhomp](https://github.com/vanness30214/zhomp)

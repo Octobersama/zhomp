@@ -7,7 +7,7 @@
 	"keywords": ["omp", "oh-my-pi", "chinese", "zh", "i18n", "localization", "汉化"],
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/<your-name>/zhomp"
+		"url": "https://github.com/vanness30214/zhomp.git"
 	},
 	"files": ["extensions", "dict", "scripts", "README.md"],
 	"omp": {
