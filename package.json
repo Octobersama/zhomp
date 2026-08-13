@@ -1,0 +1,25 @@
+{
+	"name": "omp-zh",
+	"version": "1.0.0",
+	"description": "OMP (oh-my-pi) 中文汉化插件 — 非破坏性、可插拔。安装后以 `omp-zh` 启动即中文界面，卸载即恢复英文。",
+	"type": "module",
+	"license": "MIT",
+	"keywords": ["omp", "oh-my-pi", "chinese", "zh", "i18n", "localization", "汉化"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/<your-name>/omp-zh"
+	},
+	"files": ["extensions", "dict", "scripts", "README.md"],
+	"omp": {
+		"extensions": ["extensions/omp-zh.ts"]
+	},
+	"peerDependencies": {
+		"@oh-my-pi/pi-coding-agent": ">=17.2.4"
+	},
+	"scripts": {
+		"install:win": "powershell -ExecutionPolicy Bypass -File scripts/install.ps1",
+		"install:unix": "bash scripts/install.sh",
+		"uninstall:win": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1",
+		"uninstall:unix": "bash scripts/uninstall.sh"
+	}
+}
