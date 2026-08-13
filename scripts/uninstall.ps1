@@ -1,10 +1,10 @@
-# omp-zh uninstall (Windows PowerShell)
+# zhomp uninstall (Windows PowerShell)
 #
-# Removes the extension + dictionary + `omp-zh.cmd` launcher.
+# Removes the extension + dictionary + `zhomp.cmd` launcher.
 $ErrorActionPreference = "Stop"
 
 $HomeDir = $HOME
-$OmpAgentExtFile = Join-Path $HomeDir ".omp\agent\extensions\omp-zh.ts"
+$OmpAgentExtFile = Join-Path $HomeDir ".omp\agent\extensions\zhomp.ts"
 $OmpZhDir = Join-Path $HomeDir ".omp\zh"
 $BunBinDir = Join-Path $HomeDir ".bun\bin"
 
@@ -12,8 +12,8 @@ $removed = $false
 
 foreach ($f in @(
 	$OmpAgentExtFile,
-	(Join-Path $BunBinDir "omp-zh"),
-	(Join-Path $BunBinDir "omp-zh.cmd")
+	(Join-Path $BunBinDir "zhomp"),
+	(Join-Path $BunBinDir "zhomp.cmd")
 )) {
 	if (Test-Path $f) {
 		Remove-Item -Force $f
@@ -37,7 +37,7 @@ if (Test-Path $OmpZhDir) {
 
 if ($removed) {
 	Write-Host ""
-	Write-Host "OK: omp-zh uninstalled, UI back to English."
+	Write-Host "OK: zhomp uninstalled, UI back to English."
 } else {
-	Write-Host "omp-zh is not installed."
+	Write-Host "zhomp is not installed."
 }

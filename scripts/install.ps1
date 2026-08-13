@@ -1,6 +1,6 @@
-# omp-zh install (Windows PowerShell)
+# zhomp install (Windows PowerShell)
 #
-# Installs: copies the extension + dictionary, generates `omp-zh.cmd`.
+# Installs: copies the extension + dictionary, generates `zhomp.cmd`.
 $ErrorActionPreference = "Stop"
 
 # Repo dir = parent of the scripts dir.
@@ -35,21 +35,21 @@ Write-Host "Found omp package: $pkgDir"
 
 # ── Install ────────────────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path $OmpAgentExtDir, $OmpZhDir, $BunBinDir | Out-Null
-Copy-Item (Join-Path $RepoDir "extensions\omp-zh.ts") (Join-Path $OmpAgentExtDir "omp-zh.ts") -Force
+Copy-Item (Join-Path $RepoDir "extensions\zhomp.ts") (Join-Path $OmpAgentExtDir "zhomp.ts") -Force
 Copy-Item (Join-Path $RepoDir "dict\zh-CN.json") (Join-Path $OmpZhDir "dict.json") -Force
 
-# Generate omp-zh.cmd (source-mode launcher; official `omp` stays untouched)
-$cmdContent = "@echo off`r`nrem omp-zh: run omp from src so the zh extension shares module instances.`r`nbun `"$pkgDir\src\cli.ts`" %*`r`n"
-Set-Content -Path (Join-Path $BunBinDir "omp-zh.cmd") -Value $cmdContent -Encoding ASCII
+# Generate zhomp.cmd (source-mode launcher; official `omp` stays untouched)
+$cmdContent = "@echo off`r`nrem zhomp: run omp from src so the zh extension shares module instances.`r`nbun `"$pkgDir\src\cli.ts`" %*`r`n"
+Set-Content -Path (Join-Path $BunBinDir "zhomp.cmd") -Value $cmdContent -Encoding ASCII
 
 Write-Host ""
-Write-Host "OK: omp-zh installed"
-Write-Host "  extension: $OmpAgentExtDir\omp-zh.ts"
+Write-Host "OK: zhomp installed"
+Write-Host "  extension: $OmpAgentExtDir\zhomp.ts"
 Write-Host "  dict:      $OmpZhDir\dict.json"
-Write-Host "  launcher:  $BunBinDir\omp-zh.cmd"
+Write-Host "  launcher:  $BunBinDir\zhomp.cmd"
 Write-Host ""
 Write-Host "Usage:"
-Write-Host "  omp-zh          # Chinese UI (source mode; use Windows Terminal + UTF-8)"
+Write-Host "  zhomp           # Chinese UI (source mode; use Windows Terminal + UTF-8)"
 Write-Host "  omp             # official (English, unaffected)"
 Write-Host "Uninstall:"
 Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1"

@@ -1,4 +1,4 @@
-# omp-zh — OMP 中文汉化插件
+# zhomp — OMP 中文汉化插件
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ omp 官方**没有 i18n 机制**，设置界面字符串硬编码在 `settings-s
 - 本项目用 **源码模式**（`bun <pkg>/src/cli.ts`）启动，此时汉化扩展与主程序共享同一模块实例，扩展在加载阶段改写 schema 的 `label/description/group/options` 字符串
 
 因此：
-- `omp-zh` 命令 = 源码模式 + 汉化扩展 → 中文界面
+- `zhomp` 命令 = 源码模式 + 汉化扩展 → 中文界面
 - `omp` 命令 = 官方 bundle → 英文界面（互不干扰）
 
 ## 安装
@@ -34,21 +34,21 @@ omp 官方**没有 i18n 机制**，设置界面字符串硬编码在 `settings-s
 ### Windows (PowerShell)
 
 ```powershell
-cd omp-zh
+cd zhomp
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 ```
 
 ### macOS / Linux
 
 ```bash
-cd omp-zh
+cd zhomp
 bash scripts/install.sh
 ```
 
 ## 使用
 
 ```bash
-omp-zh          # 中文界面（源码模式，建议在 Windows Terminal 中使用）
+zhomp           # 中文界面（源码模式，建议在 Windows Terminal 中使用）
 omp             # 官方原版（英文，不受影响）
 ```
 
@@ -66,13 +66,13 @@ powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1
 bash scripts/uninstall.sh
 ```
 
-卸载会删除扩展文件、字典与 `omp-zh` 启动命令，界面完全恢复英文。
+卸载会删除扩展文件、字典与 `zhomp` 启动命令，界面完全恢复英文。
 
 ## 文件结构
 
 ```
-omp-zh/
-├── extensions/omp-zh.ts   # 汉化扩展（设置界面 schema 改写）
+zhomp/
+├── extensions/zhomp.ts    # 汉化扩展（设置界面 schema 改写）
 ├── dict/zh-CN.json        # en→zh 翻译字典（1878 条）
 ├── scripts/
 │   ├── install.sh         # macOS/Linux 安装

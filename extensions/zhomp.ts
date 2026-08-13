@@ -4,13 +4,13 @@
 //   在扩展加载阶段（早于设置面板首次打开与 cachedDefs 构建），改写
 //   settings-schema 的 label/description/group/options 字符串。
 //   要求以源码模式启动 omp（`bun <pkg>/src/cli.ts`，由安装脚本生成的
-//   `omp-zh` 命令负责），此时扩展与主程序共享同一磁盘模块实例；
+//   `zhomp` 命令负责），此时扩展与主程序共享同一磁盘模块实例；
 //   若以官方 bundle（dist/cli.js）启动则 schema 被内联，扩展无法触及，
 //   汉化不生效（但也不报错、不影响功能，界面保持英文）。
 //
 // 可插拔：
 //   - 安装：scripts/install.{sh,ps1} 复制本文件到 ~/.omp/agent/extensions/
-//     并生成 `omp-zh` 启动命令 → 用 `omp-zh` 启动即汉化
+//     并生成 `zhomp` 启动命令 → 用 `zhomp` 启动即汉化
 //   - 卸载：scripts/uninstall.{sh,ps1} 删除扩展与启动命令 → 恢复英文
 //   - 官方 omp 命令不受影响，始终英文
 //
@@ -57,13 +57,13 @@ function resolveDictPath(): string {
 function loadDict(): Record<string, string> {
 	const dictPath = resolveDictPath();
 	if (!existsSync(dictPath)) {
-		console.log(`[omp-zh] dict.json 不存在: ${dictPath}（跳过汉化）`);
+		console.log(`[zhomp] dict.json 不存在: ${dictPath}（跳过汉化）`);
 		return {};
 	}
 	try {
 		return JSON.parse(readFileSync(dictPath, "utf8")) as Record<string, string>;
 	} catch (err) {
-		console.log("[omp-zh] dict.json 解析失败:", err instanceof Error ? err.message : String(err));
+		console.log("[zhomp] dict.json 解析失败:", err instanceof Error ? err.message : String(err));
 		return {};
 	}
 }
@@ -164,9 +164,9 @@ export default async function (pi: unknown): Promise<void> {
 		}
 
 		console.log(
-			`[omp-zh] 汉化完成: label ${trLabel}, description ${trDesc}, group ${trGroup}, option 文本 ${trOpt}（字典 ${keyCount} 条）`,
+			`[zhomp] 汉化完成: label ${trLabel}, description ${trDesc}, group ${trGroup}, option 文本 ${trOpt}（字典 ${keyCount} 条）`,
 		);
 	} catch (err) {
-		console.log("[omp-zh] 汉化失败:", err instanceof Error ? err.message : String(err));
+		console.log("[zhomp] 汉化失败:", err instanceof Error ? err.message : String(err));
 	}
 }

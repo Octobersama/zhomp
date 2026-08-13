@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# omp-zh 卸载脚本（macOS / Linux / Git Bash）
+# zhomp 卸载脚本（macOS / Linux / Git Bash）
 #
-# 卸载 = 删除扩展 + 字典 + `omp-zh` 启动命令 → 完全恢复英文
+# 卸载 = 删除扩展 + 字典 + `zhomp` 启动命令 → 完全恢复英文
 set -euo pipefail
 
 # 解析用户主目录：优先 Windows 的 USERPROFILE，其次 POSIX HOME。
@@ -15,15 +15,15 @@ elif [ -n "${HOME:-}" ]; then
 else
 	HOME_DIR="$(eval echo ~)"
 fi
-OMP_AGENT_EXT_FILE="$HOME_DIR/.omp/agent/extensions/omp-zh.ts"
+OMP_AGENT_EXT_FILE="$HOME_DIR/.omp/agent/extensions/zhomp.ts"
 OMP_ZH_DIR="$HOME_DIR/.omp/zh"
 BUN_BIN_DIR="$HOME_DIR/.bun/bin"
 
 removed=0
 for f in \
 	"$OMP_AGENT_EXT_FILE" \
-	"$BUN_BIN_DIR/omp-zh" \
-	"$BUN_BIN_DIR/omp-zh.cmd"; do
+	"$BUN_BIN_DIR/zhomp" \
+	"$BUN_BIN_DIR/zhomp.cmd"; do
 	if [ -f "$f" ]; then
 		rm -f "$f"
 		echo "已删除: $f"
@@ -46,7 +46,7 @@ fi
 
 if [ "$removed" = "1" ]; then
 	echo ""
-	echo "✅ omp-zh 已卸载，界面恢复英文"
+	echo "✅ zhomp 已卸载，界面恢复英文"
 else
-	echo "omp-zh 未安装或已卸载"
+	echo "zhomp 未安装或已卸载"
 fi

@@ -1,17 +1,17 @@
 {
-	"name": "omp-zh",
+	"name": "zhomp",
 	"version": "1.0.0",
-	"description": "OMP (oh-my-pi) 中文汉化插件 — 非破坏性、可插拔。安装后以 `omp-zh` 启动即中文界面，卸载即恢复英文。",
+	"description": "OMP (oh-my-pi) 中文汉化插件 — 非破坏性、可插拔。安装后以 `zhomp` 启动即中文界面，卸载即恢复英文。",
 	"type": "module",
 	"license": "MIT",
 	"keywords": ["omp", "oh-my-pi", "chinese", "zh", "i18n", "localization", "汉化"],
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/<your-name>/omp-zh"
+		"url": "https://github.com/<your-name>/zhomp"
 	},
 	"files": ["extensions", "dict", "scripts", "README.md"],
 	"omp": {
-		"extensions": ["extensions/omp-zh.ts"]
+		"extensions": ["extensions/zhomp.ts"]
 	},
 	"peerDependencies": {
 		"@oh-my-pi/pi-coding-agent": ">=17.2.4"
