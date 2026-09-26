@@ -1,0 +1,3 @@
+# Keep the launcher independent of the caller's Bun runtime configuration.
+preload = []
+env = false

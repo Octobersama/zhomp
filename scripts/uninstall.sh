@@ -1,52 +1,51 @@
 #!/usr/bin/env bash
-# zhomp 卸载脚本（macOS / Linux / Git Bash）
-#
-# 卸载 = 删除扩展 + 字典 + `zhomp` 启动命令 → 完全恢复英文
+# 删除 zhomp 自有文件；没有 Bun 也可以卸载。
 set -euo pipefail
-
-# 解析用户主目录：优先 Windows 的 USERPROFILE，其次 POSIX HOME。
-# 显式设置 OMP_ZH_HOME 可覆盖（例如 Git Bash 下 HOME=/root 为虚拟路径时）。
 if [ -n "${OMP_ZH_HOME:-}" ]; then
-	HOME_DIR="$OMP_ZH_HOME"
-elif [ -n "${USERPROFILE:-}" ]; then
-	HOME_DIR="$USERPROFILE"
-elif [ -n "${HOME:-}" ]; then
-	HOME_DIR="$HOME"
+	home_dir="$OMP_ZH_HOME"
+elif [ -n "${USERPROFILE:-}" ] && [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
+	home_dir="$USERPROFILE"
 else
-	HOME_DIR="$(eval echo ~)"
+	home_dir=~
+	home_dir="${HOME:-$home_dir}"
 fi
-OMP_AGENT_EXT_FILE="$HOME_DIR/.omp/agent/extensions/zhomp.ts"
-OMP_ZH_DIR="$HOME_DIR/.omp/zh"
-BUN_BIN_DIR="$HOME_DIR/.bun/bin"
-
+if command -v cygpath >/dev/null 2>&1; then home_dir="$(cygpath -u "$home_dir")"; fi
+if [[ "$home_dir" == '~' || "$home_dir" == '~/'* ]]; then
+	default_home=~
+	home_dir="$default_home${home_dir:1}"
+fi
+zh_dir="$home_dir/.omp/zh"
 removed=0
-for f in \
-	"$OMP_AGENT_EXT_FILE" \
-	"$BUN_BIN_DIR/zhomp" \
-	"$BUN_BIN_DIR/zhomp.cmd"; do
-	if [ -f "$f" ]; then
-		rm -f "$f"
-		echo "已删除: $f"
+for file in \
+	"$home_dir/.omp/agent/extensions/zhomp.ts" \
+	"$zh_dir/dict.json" \
+	"$zh_dir/launch.ts" \
+	"$zh_dir/launch.json" \
+	"$zh_dir/zhomp.toml" \
+	"$home_dir/.bun/bin/zhomp" \
+	"$home_dir/.bun/bin/zhomp.cmd"; do
+	if [ -f "$file" ] || [ -L "$file" ]; then
+		rm -- "$file"
+		printf '已删除: %s\n' "$file"
 		removed=1
+	elif [ -e "$file" ]; then
+		printf '错误：拒绝删除非文件目标: %s\n' "$file" >&2
+		exit 1
 	fi
 done
-
-# 字典目录: 仅当只包含 dict.json 时删除整个目录，避免误删用户其他文件
-if [ -d "$OMP_ZH_DIR" ]; then
-	remaining="$(ls -A "$OMP_ZH_DIR" 2>/dev/null | wc -l | tr -d ' ')"
-	if [ "$remaining" = "0" ]; then
-		rmdir "$OMP_ZH_DIR"
-		echo "已删除空目录: $OMP_ZH_DIR"
-	elif [ "$remaining" = "1" ] && [ -f "$OMP_ZH_DIR/dict.json" ]; then
-		rm -f "$OMP_ZH_DIR/dict.json"
-		rmdir "$OMP_ZH_DIR"
-		echo "已删除字典与目录: $OMP_ZH_DIR"
+if [ -d "$zh_dir" ]; then
+	# rmdir only succeeds for an empty directory. Keep user side files untouched.
+	if ! rmdir -- "$zh_dir" 2>/dev/null; then
+		shopt -s nullglob dotglob
+		remaining=("$zh_dir"/*)
+		if [ "${#remaining[@]}" -eq 0 ]; then
+			printf '错误：无法删除空目录: %s\n' "$zh_dir" >&2
+			exit 1
+		fi
 	fi
 fi
-
-if [ "$removed" = "1" ]; then
-	echo ""
-	echo "✅ zhomp 已卸载，界面恢复英文"
+if [ "$removed" -eq 1 ]; then
+	printf '%s\n' 'zhomp 已卸载；用户配置、会话与其他文件保持不变。'
 else
-	echo "zhomp 未安装或已卸载"
+	printf '%s\n' 'zhomp 未安装或已经卸载。'
 fi

@@ -1,0 +1,38 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install development dependencies
+        run: bun install --frozen-lockfile
+      - name: Type check
+        run: bun run typecheck
+      - name: Install supported host
+        shell: bash
+        run: |
+          version=$(bun -p '(await Bun.file("package.json").json()).peerDependencies["@oh-my-pi/pi-coding-agent"]')
+          bun install -g "@oh-my-pi/pi-coding-agent@$version"
+      - name: Behavioral regression tests
+        run: bun test tests
+      - name: Full platform verification
+        run: bun run verify -- --require-all
+      - name: Tracked diff whitespace
+        run: git diff --check

@@ -1,6 +1,6 @@
 {
 	"name": "zhomp",
-	"version": "1.0.0",
+	"version": "2.0.0",
 	"description": "OMP (oh-my-pi) 中文汉化插件 — 非破坏性、可插拔。安装后以 `zhomp` 启动即中文界面，卸载即恢复英文。",
 	"type": "module",
 	"license": "MIT",
@@ -9,17 +9,27 @@
 		"type": "git",
 		"url": "https://github.com/vanness30214/zhomp.git"
 	},
-	"files": ["extensions", "dict", "scripts", "README.md"],
+	"files": ["extensions", "dict", "runtime", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.sh", "scripts/install.ps1", "scripts/uninstall.sh", "scripts/uninstall.ps1", "README.md", "INSTALL.md", "CHANGELOG.md"],
 	"omp": {
 		"extensions": ["extensions/zhomp.ts"]
 	},
 	"peerDependencies": {
-		"@oh-my-pi/pi-coding-agent": ">=17.2.4"
+		"@oh-my-pi/pi-coding-agent": "18.3.2"
+	},
+	"engines": {
+		"bun": ">=1.4.2"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.2",
+		"typescript": "5.9.3"
 	},
 	"scripts": {
 		"install:win": "powershell -ExecutionPolicy Bypass -File scripts/install.ps1",
 		"install:unix": "bash scripts/install.sh",
 		"uninstall:win": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1",
-		"uninstall:unix": "bash scripts/uninstall.sh"
+		"uninstall:unix": "bash scripts/uninstall.sh",
+		"test": "bun test tests",
+		"verify": "bun --no-install --no-env-file --config=runtime/zhomp.toml scripts/verify.ts",
+		"typecheck": "tsc --noEmit"
 	}
 }

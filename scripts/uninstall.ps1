@@ -1,43 +1,46 @@
-# zhomp uninstall (Windows PowerShell)
-#
-# Removes the extension + dictionary + `zhomp.cmd` launcher.
+# Remove only zhomp-owned files. Bun is not required for uninstall.
 $ErrorActionPreference = "Stop"
-
-$HomeDir = $HOME
-$OmpAgentExtFile = Join-Path $HomeDir ".omp\agent\extensions\zhomp.ts"
-$OmpZhDir = Join-Path $HomeDir ".omp\zh"
-$BunBinDir = Join-Path $HomeDir ".bun\bin"
-
-$removed = $false
-
-foreach ($f in @(
-	$OmpAgentExtFile,
-	(Join-Path $BunBinDir "zhomp"),
-	(Join-Path $BunBinDir "zhomp.cmd")
-)) {
-	if (Test-Path $f) {
-		Remove-Item -Force $f
-		Write-Host "Removed: $f"
-		$removed = $true
-	}
-}
-
-# Remove the dict dir only when it contains nothing but dict.json.
-if (Test-Path $OmpZhDir) {
-	$remaining = @(Get-ChildItem -Force $OmpZhDir -ErrorAction SilentlyContinue).Count
-	if ($remaining -eq 0) {
-		Remove-Item -Force $OmpZhDir
-		Write-Host "Removed empty dir: $OmpZhDir"
-	} elseif ($remaining -eq 1 -and (Test-Path (Join-Path $OmpZhDir "dict.json"))) {
-		Remove-Item -Force (Join-Path $OmpZhDir "dict.json")
-		Remove-Item -Force $OmpZhDir
-		Write-Host "Removed dict + dir: $OmpZhDir"
-	}
-}
-
-if ($removed) {
-	Write-Host ""
-	Write-Host "OK: zhomp uninstalled, UI back to English."
+if ($env:OMP_ZH_HOME) {
+	$HomeDir = $env:OMP_ZH_HOME
+} elseif ($env:USERPROFILE) {
+	$HomeDir = $env:USERPROFILE
+} elseif ($env:HOME) {
+	$HomeDir = $env:HOME
 } else {
-	Write-Host "zhomp is not installed."
+	$HomeDir = [Environment]::GetFolderPath("UserProfile")
+}
+if ($HomeDir -match '^/([A-Za-z])/(.*)$') { $HomeDir = $Matches[1] + ':/' + $Matches[2] }
+if ($HomeDir -eq '~' -or $HomeDir.StartsWith('~/') -or $HomeDir.StartsWith('~\')) {
+	$HomeDir = Join-Path ([Environment]::GetFolderPath("UserProfile")) $HomeDir.Substring([Math]::Min(2, $HomeDir.Length))
+}
+$HomeDir = [IO.Path]::GetFullPath($HomeDir)
+$ZhDir = Join-Path $HomeDir ".omp\zh"
+$Removed = $false
+$OwnedFiles = @(
+	(Join-Path $HomeDir ".omp\agent\extensions\zhomp.ts"),
+	(Join-Path $ZhDir "dict.json"),
+	(Join-Path $ZhDir "launch.ts"),
+	(Join-Path $ZhDir "launch.json"),
+	(Join-Path $ZhDir "zhomp.toml"),
+	(Join-Path $HomeDir ".bun\bin\zhomp"),
+	(Join-Path $HomeDir ".bun\bin\zhomp.cmd")
+)
+foreach ($File in $OwnedFiles) {
+	if (Test-Path -LiteralPath $File) {
+		$Item = Get-Item -LiteralPath $File -Force
+		if ($Item.PSIsContainer) { throw "Refusing to delete a non-file target: $File" }
+		Remove-Item -LiteralPath $File -Force
+		Write-Host "Removed: $File"
+		$Removed = $true
+	}
+}
+if (Test-Path -LiteralPath $ZhDir -PathType Container) {
+	if (@(Get-ChildItem -LiteralPath $ZhDir -Force).Count -eq 0) {
+		[IO.Directory]::Delete($ZhDir)
+	}
+}
+if ($Removed) {
+	Write-Host "OK: zhomp uninstalled. User configuration, sessions and other files are unchanged."
+} else {
+	Write-Host "zhomp is not installed or has already been removed."
 }
