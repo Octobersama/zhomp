@@ -4,7 +4,7 @@ import { install } from "./install-core";
 
 const chinese = process.argv.includes("--zh");
 if (process.argv.includes("--help")) {
-	console.log("Usage: bun scripts/install.ts [--zh]\nInstall zhomp for the exact OMP peer version in package.json.\nOMP_ZH_HOME selects the installation root; OMP_ZH_PACKAGE_DIR selects the existing OMP package.");
+	console.log("Usage: bun scripts/install.ts [--zh]\nInstall zhomp for a compatible OMP host (peer range in package.json).\nOMP_ZH_HOME selects the installation root; OMP_ZH_PACKAGE_DIR selects the existing OMP package.");
 	process.exit(0);
 }
 try {

@@ -1,6 +1,6 @@
 {
 	"name": "zhomp",
-	"version": "2.0.0",
+	"version": "2.1.0",
 	"description": "OMP (oh-my-pi) 中文汉化插件 — 非破坏性、可插拔。安装后以 `zhomp` 启动即中文界面，卸载即恢复英文。",
 	"type": "module",
 	"license": "MIT",
@@ -14,7 +14,7 @@
 		"extensions": ["extensions/zhomp.ts"]
 	},
 	"peerDependencies": {
-		"@oh-my-pi/pi-coding-agent": "18.3.2"
+		"@oh-my-pi/pi-coding-agent": ">=18.3.2 <19"
 	},
 	"engines": {
 		"bun": ">=1.4.2"

@@ -20,7 +20,9 @@ for file in \
 	"$home_dir/.omp/agent/extensions/zhomp.ts" \
 	"$zh_dir/dict.json" \
 	"$zh_dir/launch.ts" \
+	"$zh_dir/host.ts" \
 	"$zh_dir/launch.json" \
+	"$zh_dir/model-ui.ts" \
 	"$zh_dir/zhomp.toml" \
 	"$home_dir/.bun/bin/zhomp" \
 	"$home_dir/.bun/bin/zhomp.cmd"; do

@@ -1,18 +1,23 @@
 import { randomUUID } from "node:crypto";
 import {
-	chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync,
-	renameSync, rmdirSync, statSync, unlinkSync, writeFileSync,
+	chmodSync, existsSync, lstatSync, mkdirSync, readFileSync,
+	renameSync, rmdirSync, unlinkSync, writeFileSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { readSupportPolicy, validatePackage } from "../runtime/host";
+import type { HostPackage } from "../runtime/host";
 
 export type Env = Record<string, string | undefined>;
-export interface HostPackage {
-	packageDir: string;
-	version: string;
-	cliPath: string;
-	tuiDir: string;
+
+export class HostNotFoundError extends Error {
+	constructor(range: string) {
+		super(`Compatible OMP (${range}) not found. Run: bun install -g @oh-my-pi/pi-coding-agent, or set OMP_ZH_PACKAGE_DIR to its package directory.`);
+		this.name = "HostNotFoundError";
+	}
 }
+
 export interface Artifact {
 	path: string;
 	content: string | Uint8Array;
@@ -34,45 +39,20 @@ export function resolveHome(env: Env = process.env): string {
 	return absolutePath(env.OMP_ZH_HOME || (process.platform === "win32" ? env.USERPROFILE : undefined) || env.HOME || homedir());
 }
 
-export function supportedVersion(repoDir: string): string {
-	const pkg: unknown = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf8"));
-	const version = record(pkg) && record(pkg.peerDependencies) ? pkg.peerDependencies["@oh-my-pi/pi-coding-agent"] : undefined;
-	if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
-		throw new Error("zhomp must declare one exact supported OMP version in package.json.");
+function lstatIfPresent(path: string): Stats | undefined {
+	try {
+		return lstatSync(path);
+	} catch (error) {
+		if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
+		throw error;
 	}
-	return version;
 }
 
-export function validatePackage(input: string, version: string): HostPackage {
-	const packageDir = realpathSync(absolutePath(input));
-	const pkg: unknown = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
-	if (!record(pkg) || pkg.name !== "@oh-my-pi/pi-coding-agent" || pkg.version !== version) {
-		throw new Error(`Expected @oh-my-pi/pi-coding-agent ${version} at ${packageDir}; found ${record(pkg) ? String(pkg.name) + " " + String(pkg.version) : "invalid metadata"}.`);
-	}
-	for (const file of ["src/cli.ts", "src/cli-commands.ts", "src/config/all-settings.ts", "src/config/settings-ui.ts"]) {
-		if (!statSync(join(packageDir, file)).isFile()) throw new Error(`Missing host source: ${file}`);
-	}
-	// Resolve from the validated host, never from the repository or Bun's cache.
-	const defs = realpathSync(Bun.resolveSync("@oh-my-pi/pi-tui/overlays/settings-defs", packageDir));
-	let tuiDir = dirname(defs);
-	while (!existsSync(join(tuiDir, "package.json"))) {
-		const parent = dirname(tuiDir);
-		if (parent === tuiDir) throw new Error("Cannot locate the host's pi-tui package.");
-		tuiDir = parent;
-	}
-	const tui: unknown = JSON.parse(readFileSync(join(tuiDir, "package.json"), "utf8"));
-	const tuiVersion = record(pkg.dependencies) ? pkg.dependencies["@oh-my-pi/pi-tui"] : undefined;
-	if (!record(tui) || tui.name !== "@oh-my-pi/pi-tui" || typeof tui.version !== "string" || typeof tuiVersion !== "string" || !Bun.semver.satisfies(tui.version, tuiVersion)) {
-		throw new Error(`The host's pi-tui dependency does not satisfy ${String(tuiVersion)}.`);
-	}
-	return { packageDir, version, cliPath: join(packageDir, "src", "cli.ts"), tuiDir };
-}
-
-export function discoverPackage(version: string, env: Env = process.env): HostPackage {
-	if (env.OMP_ZH_PACKAGE_DIR) return validatePackage(absolutePath(env.OMP_ZH_PACKAGE_DIR), version);
+export function discoverPackage(range: string, env: Env = process.env): HostPackage {
+	if (env.OMP_ZH_PACKAGE_DIR) return validatePackage(absolutePath(env.OMP_ZH_PACKAGE_DIR), range);
 	const userHome = absolutePath((process.platform === "win32" ? env.USERPROFILE : undefined) || env.HOME || homedir());
 	const packageSuffix = "node_modules/@oh-my-pi/pi-coding-agent";
-	if (env.BUN_INSTALL_GLOBAL_DIR) return validatePackage(join(absolutePath(env.BUN_INSTALL_GLOBAL_DIR), packageSuffix), version);
+	if (env.BUN_INSTALL_GLOBAL_DIR) return validatePackage(join(absolutePath(env.BUN_INSTALL_GLOBAL_DIR), packageSuffix), range);
 
 	// Bun's global package-manager settings are independent of zhomp's install root.
 	const configs = [join(userHome, ".bunfig.toml")];
@@ -82,11 +62,18 @@ export function discoverPackage(version: string, env: Env = process.env): HostPa
 	for (const file of configs) {
 		if (!existsSync(file)) continue;
 		const config: unknown = Bun.TOML.parse(readFileSync(file, "utf8"));
-		if (record(config) && record(config.install) && typeof config.install.globalDir === "string") {
-			configuredRoot = absolutePath(config.install.globalDir, dirname(file));
+		if (!record(config)) throw new Error(`Invalid Bun configuration at ${file}.`);
+		if (config.install === undefined) continue;
+		if (!record(config.install)) throw new Error(`Invalid Bun install configuration at ${file}.`);
+		const globalDir = config.install.globalDir;
+		if (globalDir === undefined) continue;
+		if (typeof globalDir !== "string" || globalDir.length === 0) {
+			throw new Error(`Invalid Bun install.globalDir at ${file}; expected a nonempty path.`);
 		}
+		configuredRoot = absolutePath(globalDir, dirname(file));
 	}
-	if (configuredRoot) return validatePackage(join(configuredRoot, packageSuffix), version);
+
+	if (configuredRoot) return validatePackage(join(configuredRoot, packageSuffix), range);
 	const roots = [
 		...(env.BUN_INSTALL ? [join(absolutePath(env.BUN_INSTALL), "install", "global")] : []),
 		join(userHome, ".bun", "install", "global"),
@@ -95,11 +82,12 @@ export function discoverPackage(version: string, env: Env = process.env): HostPa
 	const candidates = [...new Set(roots.map(root => join(root, packageSuffix)))];
 	const errors: string[] = [];
 	for (const candidate of candidates) {
-		if (!existsSync(candidate)) continue;
-		try { return validatePackage(candidate, version); }
+		if (!lstatIfPresent(candidate)) continue;
+		try { return validatePackage(candidate, range); }
 		catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
 	}
-	throw new Error(errors.length ? errors.join("\n") : `OMP ${version} not found. Run: bun install -g @oh-my-pi/pi-coding-agent@${version}, or set OMP_ZH_PACKAGE_DIR to its package directory.`);
+	if (errors.length > 0) throw new Error(errors.join("\n"));
+	throw new HostNotFoundError(range);
 }
 
 /** Publish one owned file set. A replace failure restores its exact previous state. */
@@ -114,9 +102,8 @@ export function publishArtifacts(artifacts: readonly Artifact[], replace: typeof
 		// Check every target before creating directories or publishing discoverable files.
 		for (const artifact of artifacts) {
 			if (!isAbsolute(artifact.path)) throw new Error(`Install target is not absolute: ${artifact.path}`);
-			if (existsSync(artifact.path) && !lstatSync(artifact.path).isFile()) {
-				throw new Error(`Refusing to replace a non-file: ${artifact.path}`);
-			}
+			const existing = lstatIfPresent(artifact.path);
+			if (existing && !existing.isFile()) throw new Error(`Refusing to replace a non-file: ${artifact.path}`);
 		}
 		for (const artifact of artifacts) {
 			const missing: string[] = [];
@@ -131,7 +118,9 @@ export function publishArtifacts(artifacts: readonly Artifact[], replace: typeof
 			if (artifact.mode !== undefined) chmodSync(entry.temp, artifact.mode);
 		}
 		for (const entry of staged) {
-			if (existsSync(entry.target)) {
+			const existing = lstatIfPresent(entry.target);
+			if (existing && !existing.isFile()) throw new Error(`Refusing to replace a non-file: ${entry.target}`);
+			if (existing) {
 				replace(entry.target, entry.backup);
 				entry.backedUp = true;
 			}
@@ -161,9 +150,9 @@ export function publishArtifacts(artifacts: readonly Artifact[], replace: typeof
 }
 
 export function install(repoDir: string, env: Env = process.env, replace: typeof renameSync = renameSync): { homeDir: string; packageDir: string; paths: string[] } {
-	const version = supportedVersion(repoDir);
+	const range = readSupportPolicy(repoDir).range;
 	const homeDir = resolveHome(env);
-	const host = discoverPackage(version, env);
+	const host = discoverPackage(range, env);
 	const metadata: unknown = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf8"));
 	if (!record(metadata) || !record(metadata.engines) || typeof metadata.engines.bun !== "string" || !Bun.semver.satisfies(Bun.version, metadata.engines.bun)) {
 		throw new Error("Bun version does not satisfy zhomp's package.json engines.bun.");
@@ -180,16 +169,18 @@ export function install(repoDir: string, env: Env = process.env, replace: typeof
 		{ path: extensionPath, content: readFileSync(join(repoDir, "extensions", "zhomp.ts")) },
 		{ path: dictPath, content: dictContent },
 		{ path: join(zhDir, "launch.ts"), content: readFileSync(join(repoDir, "runtime", "launch.ts")) },
+		{ path: join(zhDir, "host.ts"), content: readFileSync(join(repoDir, "runtime", "host.ts")) },
+		{ path: join(zhDir, "model-ui.ts"), content: readFileSync(join(repoDir, "runtime", "model-ui.ts")) },
 		{ path: join(zhDir, "zhomp.toml"), content: readFileSync(join(repoDir, "runtime", "zhomp.toml")) },
-		{ path: join(zhDir, "launch.json"), content: JSON.stringify({ packageDir: host.packageDir, tuiPackageDir: host.tuiDir, supportedVersion: version, extensionPath, dictPath }, null, 2) + "\n" },
+		{ path: join(zhDir, "launch.json"), content: JSON.stringify({ packageDir: host.packageDir, supportedRange: range, extensionPath, dictPath }, null, 2) + "\n" },
 	];
 	const binDir = join(homeDir, ".bun", "bin");
 	if (process.platform !== "win32" || env.OMP_ZH_INSTALL_SHELL === "bash") {
-		artifacts.push({ path: join(binDir, "zhomp"), mode: 0o755, content: '#!/usr/bin/env bash\nset -euo pipefail\nlauncher_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"\nexec bun --no-install --no-env-file --config="$launcher_dir/../../.omp/zh/zhomp.toml" "$launcher_dir/../../.omp/zh/launch.ts" "$@"\n' });
+		artifacts.push({ path: join(binDir, "zhomp"), mode: 0o755, content: '#!/usr/bin/env bash\nset -euo pipefail\nlauncher_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"\nexec bun --no-install --no-env-file --config="$launcher_dir/../../.omp/zh/zhomp.toml" "$launcher_dir/../../.omp/zh/launch.ts" -- "$@"\n' });
 	}
 	if (process.platform === "win32") {
 		// Only ASCII syntax goes into this file. %~dp0 supplies the actual Unicode path.
-		artifacts.push({ path: join(binDir, "zhomp.cmd"), content: '@echo off\r\nsetlocal DisableDelayedExpansion\r\nbun --no-install --no-env-file --config="%~dp0..\\..\\.omp\\zh\\zhomp.toml" "%~dp0..\\..\\.omp\\zh\\launch.ts" %*\r\nexit /b %ERRORLEVEL%\r\n' });
+		artifacts.push({ path: join(binDir, "zhomp.cmd"), content: '@echo off\r\nsetlocal DisableDelayedExpansion\r\nbun --no-install --no-env-file --config="%~dp0..\\..\\.omp\\zh\\zhomp.toml" "%~dp0..\\..\\.omp\\zh\\launch.ts" -- %*\r\nexit /b %ERRORLEVEL%\r\n' });
 	}
 	publishArtifacts(artifacts, replace);
 	return { homeDir, packageDir: host.packageDir, paths: artifacts.map(artifact => artifact.path) };

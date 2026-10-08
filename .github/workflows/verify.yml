@@ -9,11 +9,28 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      hosts: ${{ steps.hosts.outputs.hosts }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Derive minimum and latest host versions
+        id: hosts
+        shell: bash
+        run: |
+          hosts=$(bun -e 'import { readSupportPolicy } from "./runtime/host.ts"; console.log(JSON.stringify([readSupportPolicy(process.cwd()).minimumVersion, "latest"]))')
+          printf 'hosts=%s\n' "$hosts" >> "$GITHUB_OUTPUT"
   verify:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
+        host: ${{ fromJSON(needs.prepare.outputs.hosts) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -25,11 +42,9 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Type check
         run: bun run typecheck
-      - name: Install supported host
+      - name: Install selected host
         shell: bash
-        run: |
-          version=$(bun -p '(await Bun.file("package.json").json()).peerDependencies["@oh-my-pi/pi-coding-agent"]')
-          bun install -g "@oh-my-pi/pi-coding-agent@$version"
+        run: bun install -g "@oh-my-pi/pi-coding-agent@${{ matrix.host }}"
       - name: Behavioral regression tests
         run: bun test tests
       - name: Full platform verification

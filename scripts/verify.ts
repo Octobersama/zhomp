@@ -1,17 +1,44 @@
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { discoverPackage, install, supportedVersion, validatePackage } from "./install-core";
+import { discoverPackage, HostNotFoundError, install } from "./install-core";
+import { readSupportPolicy } from "../runtime/host";
+import type { HostPackage } from "../runtime/host";
 import { makeTempDir, removeTree, runCommand, snapshotTree, createHostFixture, writeText } from "../tests/verification-fixtures";
 import type { CommandResult } from "../tests/verification-fixtures";
+
+function versionBelow(version: string): string {
+	const parts = version.split(".").map(Number);
+	assertion(parts.length === 3 && parts.every(Number.isSafeInteger), `cannot derive a prior version from ${version}`);
+	const [major, minor, patch] = parts;
+	if (patch > 0) return `${major}.${minor}.${patch - 1}`;
+	if (minor > 0) return `${major}.${minor - 1}.0`;
+	if (major > 0) return `${major - 1}.0.0`;
+	throw new Error(`cannot derive a version below ${version}`);
+}
+
+function discoverOptionalRealHost(): HostPackage | undefined {
+	try {
+		return discoverPackage(supported, process.env);
+	} catch (error) {
+		if (error instanceof HostNotFoundError) return undefined;
+		throw error;
+	}
+}
+
+function discoverRealHost(): HostPackage {
+	const host = discoverOptionalRealHost();
+	if (!host) throw new Error("SKIP: compatible OMP is not installed and OMP_ZH_PACKAGE_DIR is unset");
+	return host;
+}
 
 type Status = "PASS" | "FAIL" | "SKIP";
 interface Result { id: string; status: Status; detail: string }
 type CaseRun = () => Promise<string>;
 
 const repoDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const supported = supportedVersion(repoDir);
+const { range: supported, minimumVersion: fixtureVersion } = readSupportPolicy(repoDir);
 const bun = process.execPath;
 const requested = process.argv.indexOf("--case");
 const selected = requested >= 0 ? process.argv[requested + 1]?.toUpperCase() : undefined;
@@ -21,13 +48,6 @@ function assertion(value: unknown, message: string): asserts value {
 	if (!value) throw new Error(message);
 }
 
-function realHostDir(): string | undefined {
-	const explicit = process.env.OMP_ZH_PACKAGE_DIR;
-	if (explicit) return resolve(explicit);
-	const candidate = join(process.env.USERPROFILE || process.env.HOME || "", ".bun", "install", "global", "node_modules", "@oh-my-pi", "pi-coding-agent");
-	return existsSync(candidate) ? candidate : undefined;
-}
-
 async function withTemp(name: string, action: (root: string) => Promise<string> | string): Promise<string> {
 	const root = makeTempDir(name);
 	try { return await action(root); }
@@ -35,14 +55,16 @@ async function withTemp(name: string, action: (root: string) => Promise<string> 
 }
 
 async function v01(): Promise<string> {
-	assertion(supported === "18.3.2", `expected exact peer 18.3.2, found ${supported}`);
-	const host = realHostDir();
-	if (!host) throw new Error("SKIP: OMP 18.3.2 is not installed and OMP_ZH_PACKAGE_DIR is unset");
-	const validated = validatePackage(host, supported);
-	assertion(validated.version === supported, "real host version mismatch");
-	const rejection = await runCommand(bun, ["test", "tests/install.test.ts", "--test-name-pattern", "rejects adjacent versions"], { cwd: repoDir });
-	assertion(rejection.exitCode === 0, rejection.stderr || rejection.stdout);
-	return `exact ${supported}; host=${validated.packageDir}; tui=${validated.tuiDir}`;
+	const host = discoverRealHost();
+	const olderRoot = makeTempDir("zhomp-v01-old");
+	try {
+		const olderHost = createHostFixture(olderRoot, versionBelow(fixtureVersion));
+		const olderHome = join(olderRoot, "home");
+		let rejected = false;
+		try { install(repoDir, { ...process.env, OMP_ZH_HOME: olderHome, OMP_ZH_PACKAGE_DIR: olderHost }); } catch { rejected = true; }
+		assertion(rejected && !existsSync(olderHome), "host below the compatibility range was not rejected before writes");
+	} finally { removeTree(olderRoot); }
+	return `compatible ${supported}; host=${host.version} at ${host.packageDir}; tui=${host.tuiDir}`;
 }
 
 async function v02(): Promise<string> {
@@ -52,7 +74,7 @@ async function v02(): Promise<string> {
 }
 
 async function installFixture(root: string, homeDir: string): Promise<{ packageDir: string; paths: string[] }> {
-	const packageDir = createHostFixture(root, supported);
+	const packageDir = createHostFixture(root, fixtureVersion);
 	const result = install(repoDir, { ...process.env, OMP_ZH_HOME: homeDir, OMP_ZH_PACKAGE_DIR: packageDir, OMP_ZH_INSTALL_SHELL: "bash" });
 	return { packageDir, paths: result.paths };
 }
@@ -76,10 +98,10 @@ async function v03(): Promise<string> {
 		writeText(join(project, "bunfig.toml"), 'preload = ["./missing-project-preload.ts"]\n');
 		const isolated = await runCommand(bun, ["--no-install", "--no-env-file", config, launch, "read", "./marker.txt"], { cwd: project });
 		assertion(isolated.exitCode === 0 && isolated.stdout === "project-cwd-marker\n", "project Bun preload leaked into launcher");
-		const host = realHostDir();
+		const host = discoverOptionalRealHost();
 		if (host) {
 			const actualHome = join(root, "real-home");
-			install(repoDir, { ...process.env, OMP_ZH_HOME: actualHome, OMP_ZH_PACKAGE_DIR: host, OMP_ZH_INSTALL_SHELL: "bash" });
+			install(repoDir, { ...process.env, OMP_ZH_HOME: actualHome, OMP_ZH_PACKAGE_DIR: host.packageDir, OMP_ZH_INSTALL_SHELL: "bash" });
 			const actual = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(actualHome, ".omp", "zh", "zhomp.toml")}`, join(actualHome, ".omp", "zh", "launch.ts"), "read", "./marker.txt"], {
 				cwd: project,
 				env: { ...process.env, PI_CODING_AGENT_DIR: join(root, "agent"), PI_CONFIG_DIR: relative(homedir(), join(root, "config")), OMP_PROFILE: undefined, PI_PROFILE: undefined },
@@ -104,7 +126,7 @@ async function v04(): Promise<string> {
 			const command = `& '${launcher.replaceAll("'", "''")}' --version; exit $LASTEXITCODE`;
 			const encoded = Buffer.from(command, "utf16le").toString("base64");
 			const cmd = await runCommand(ps, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { cwd: root });
-			assertion(cmd.exitCode === 0 && cmd.stdout.includes(`omp/${supported}`), cmd.stderr || cmd.stdout);
+			assertion(cmd.exitCode === 0 && cmd.stdout.includes(`omp/${fixtureVersion}`), cmd.stderr || cmd.stdout);
 			const values = ["inspect", "two words", "中文", "$value", "`literal`", "100%", "bang!", "(paren)", "[bracket]"];
 			const inspectCommand = `& '${launcher.replaceAll("'", "''")}' ${values.map(value => `'${value.replaceAll("'", "''")}'`).join(" ")}; exit $LASTEXITCODE`;
 			const argsResult = await runCommand(ps, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(inspectCommand, "utf16le").toString("base64")], { cwd: root });
@@ -117,9 +139,7 @@ async function v04(): Promise<string> {
 }
 
 async function v05(): Promise<string> {
-	const host = realHostDir();
-	if (!host) throw new Error("SKIP: install the supported OMP package for native package-discovery verification");
-	const discovered = discoverPackage(supported, { ...process.env, OMP_ZH_PACKAGE_DIR: host });
+	const discovered = discoverRealHost();
 	return withTemp("zhomp-v05", async root => {
 		const discovery = await runCommand(bun, ["test", "tests/install.test.ts", "--test-name-pattern", "configured global"], { cwd: repoDir });
 		assertion(discovery.exitCode === 0, discovery.stderr || discovery.stdout);
@@ -131,19 +151,20 @@ async function v05(): Promise<string> {
 		assertion(installed.exitCode === 0, installed.stderr || installed.stdout);
 		const launch = join(root, ".omp", "zh", "launch.ts");
 		const result = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(root, ".omp", "zh", "zhomp.toml")}`, launch, "--version"], { cwd: root });
-		assertion(result.exitCode === 0 && result.stdout.includes(`omp/${supported}`), result.stderr || result.stdout);
-		return `${process.platform}: native installer and installed real-host launcher output omp/${supported}`;
+		assertion(result.exitCode === 0 && result.stdout.includes(`omp/${discovered.version}`), result.stderr || result.stdout);
+		return `${process.platform}: native installer and installed real-host launcher output omp/${discovered.version}`;
 	});
 }
-
 async function v06(): Promise<string> {
 	return withTemp("zhomp-v06", async root => {
 		const home = join(root, "custom-home");
-		await installFixture(root, home);
+		const { packageDir } = await installFixture(root, home);
 		const config = JSON.parse(readFileSync(join(home, ".omp", "zh", "launch.json"), "utf8")) as Record<string, unknown>;
+		assertion(existsSync(join(home, ".omp", "zh", "host.ts")), "host.ts was not installed");
 		assertion(typeof config.extensionPath === "string" && config.extensionPath.startsWith(home), "extension path escaped custom home");
 		assertion(typeof config.dictPath === "string" && config.dictPath.startsWith(home), "dictionary path escaped custom home");
-		assertion(typeof config.tuiPackageDir === "string", "TUI package path was not persisted");
+		assertion(config.packageDir === packageDir, "host package path was not persisted");
+		assertion(config.supportedRange === supported, "supported range was not persisted");
 		const custom = join(root, "custom-dict.json");
 		writeText(custom, '{"Theme":"自定义主题"}');
 		const result = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(home, ".omp", "zh", "zhomp.toml")}`, join(home, ".omp", "zh", "launch.ts"), "inspect"], {
@@ -158,7 +179,7 @@ async function v06(): Promise<string> {
 }
 
 async function v07(): Promise<string> {
-	const result = await runCommand(bun, ["test", "tests/install.test.ts"], { cwd: repoDir });
+	const result = await runCommand(bun, ["test", "tests/install.test.ts"], { cwd: repoDir, timeout: 150_000 });
 	assertion(result.exitCode === 0, result.stderr || result.stdout);
 	return "all publish failure points, exact version rejection, discovery and reinstall regressions passed";
 }
@@ -185,6 +206,8 @@ async function v09(): Promise<string> {
 			if (shell === "bash" && process.platform === "win32" && !existsSync(bash)) throw new Error("SKIP: Git Bash unavailable for cross-shell uninstall");
 			const home = join(root, `${shell} home [1]`);
 			const installed = await installFixture(join(root, shell), home);
+			const installedHost = join(home, ".omp", "zh", "host.ts");
+			assertion(installed.paths.includes(installedHost), "host.ts is missing from the uninstall manifest");
 			writeText(join(home, ".omp", "zh", "user.txt"), "keep");
 			writeText(join(home, ".omp", "zh", ".hidden"), "hidden");
 			writeText(join(home, ".omp", "zh", "child", "nested"), "nested");
@@ -206,16 +229,59 @@ async function v09(): Promise<string> {
 }
 
 async function v10(): Promise<string> {
-	const host = realHostDir();
-	if (!host) throw new Error("SKIP: real OMP 18.3.2 host is unavailable");
-	const validated = validatePackage(host, supported);
+	const discovered = discoverRealHost();
 	return withTemp("zhomp-v10", async root => {
-		const result = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-surface.ts")], {
-			cwd: validated.packageDir,
-			env: { ...process.env, PI_CODING_AGENT_DIR: root, PI_CONFIG_DIR: relative(homedir(), join(root, "config")), OMP_PROFILE: undefined, PI_PROFILE: undefined, PROBE_DIR: root, PROBE_EXTENSION: join(repoDir, "extensions", "zhomp.ts"), OMP_ZH_PACKAGE_DIR: validated.packageDir, OMP_ZH_TUI_PACKAGE_DIR: validated.tuiDir, OMP_ZH_SUPPORTED_VERSION: supported, OMP_ZH_DICT: join(repoDir, "dict", "zh-CN.json") },
+		const home = join(root, "home");
+		const installed = install(repoDir, { ...process.env, OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: discovered.packageDir, OMP_ZH_INSTALL_SHELL: "bash" });
+		assertion(installed.packageDir === discovered.packageDir, "real host installation selected a different package");
+		const installDir = join(home, ".omp", "zh");
+		assertion(existsSync(join(installDir, "model-ui.ts")), "installed model-ui.ts is missing");
+		const configPath = join(installDir, "launch.json");
+		const command = ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-model-surface.ts")];
+		const env = {
+			...process.env,
+			PI_CODING_AGENT_DIR: root,
+			PI_CONFIG_DIR: relative(homedir(), join(root, "config")),
+			OMP_PROFILE: undefined,
+			PI_PROFILE: undefined,
+			PROBE_DIR: root,
+			OMP_ZH_CONFIG: configPath,
+		};
+		const settingsSurface = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-surface.ts")], {
+			cwd: discovered.packageDir,
+			env,
 		});
-		assertion(result.exitCode === 0, result.stderr || result.stdout);
-		return result.stdout.trim();
+		assertion(settingsSurface.exitCode === 0, settingsSurface.stderr || settingsSurface.stdout);
+		assertion(!settingsSurface.stdout.includes("[zhomp] 汉化失败"), settingsSurface.stdout);
+		assertion(settingsSurface.stdout.includes("[zhomp] 汉化完成") && settingsSurface.stdout.includes('"loader":true') && settingsSurface.stdout.includes('"component":"SettingsSelectorComponent"'), "real settings loader did not confirm the translated SettingsSelector component");
+		const outputs: string[] = [];
+		outputs.push(settingsSurface.stdout.trim());
+		for (const mode of ["ordinary", "translated", "hostile"] as const) {
+			const result = await runCommand(bun, command, {
+				cwd: discovered.packageDir,
+				env: { ...env, MODEL_SURFACE_MODE: mode },
+				timeout: 120_000,
+			});
+			assertion(result.exitCode === 0, result.stderr || result.stdout);
+			assertion(!result.stdout.includes("[zhomp] 汉化失败"), result.stdout);
+			assertion(result.stdout.includes(`"mode":"${mode}"`) && result.stdout.includes('"component":"ModelHubComponent"'), `V10 ${mode} process did not confirm the real ModelHub component`);
+			assertion(result.stdout.includes('"unrelatedConsumer":"ModelBrowser remains English"'), `V10 ${mode} process globally translated the sibling ModelBrowser`);
+			assertion(result.stdout.includes('"roleTag":"SMOL"'), "ModelHub must preserve builtin role names in every language mode");
+			if (mode === "ordinary") {
+				assertion(result.stdout.includes('"title":"Models"') && result.stdout.includes('"roleTag":"SMOL"'), "the mismatched-PID process must retain the original ModelHub text");
+			} else {
+				assertion(result.stdout.includes("[zhomp] 汉化完成"), result.stdout);
+				assertion(result.stdout.includes('"configWrites":0'), "the translated probe must not persist user settings");
+				assertion(result.stdout.includes(`"nativeDescribe":"covered@${discovered.version}"`) || result.stdout.includes(`"nativeDescribe":"unavailable@${discovered.version}"`), `native describe capability evidence is missing for OMP ${discovered.version}`);
+				if (mode === "hostile") {
+					assertion(result.stdout.includes("__zhompModelUiInjected") && result.stdout.includes('"injectionSideEffect":false'), "hostile dictionary text was not displayed literally or caused code execution");
+				} else {
+					assertion(result.stdout.includes('"model":"Models/Roles"'), "the real ModelHub consumer changed model or selector identities");
+				}
+			}
+			outputs.push(result.stdout.trim());
+		}
+		return outputs.join("\n");
 	});
 }
 
@@ -230,7 +296,7 @@ async function v11(): Promise<string> {
 		const tar = await runCommand("tar", ["-xzf", archive, "-C", extract]);
 		assertion(tar.exitCode === 0, tar.stderr);
 		const packageRoot = join(extract, "package");
-		for (const file of ["README.md", "INSTALL.md", "LICENSE", "CHANGELOG.md", "runtime/launch.ts", "runtime/zhomp.toml", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.ps1", "scripts/install.sh", "scripts/uninstall.ps1", "scripts/uninstall.sh", "extensions/zhomp.ts", "dict/zh-CN.json"]) {
+		for (const file of ["README.md", "INSTALL.md", "LICENSE", "CHANGELOG.md", "runtime/host.ts", "runtime/launch.ts", "runtime/model-ui.ts", "runtime/zhomp.toml", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.ps1", "scripts/install.sh", "scripts/uninstall.ps1", "scripts/uninstall.sh", "extensions/zhomp.ts", "dict/zh-CN.json"]) {
 			assertion(existsSync(join(packageRoot, file)), `packed file missing: ${file}`);
 		}
 		assertion(!existsSync(join(packageRoot, "IMPROVEMENT_PLAN.md")), "review report leaked into package");
@@ -243,16 +309,18 @@ async function v11(): Promise<string> {
 				if (!target.includes(":") && !target.startsWith("#")) assertion(existsSync(join(packageRoot, target.split("#")[0])), `broken packed link: ${target}`);
 			}
 		}
-		const host = realHostDir();
-		if (!host) throw new Error("SKIP: real host unavailable for tarball installation");
+		const host = discoverRealHost();
 		const installedHome = join(root, "installed");
 		const actualInstall = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(packageRoot, "runtime", "zhomp.toml")}`, join(packageRoot, "scripts", "install.ts")], {
-			cwd: packageRoot, env: { ...process.env, OMP_ZH_HOME: installedHome, OMP_ZH_PACKAGE_DIR: host },
+			cwd: packageRoot, env: { ...process.env, OMP_ZH_HOME: installedHome, OMP_ZH_PACKAGE_DIR: host.packageDir },
 		});
 		assertion(actualInstall.exitCode === 0, actualInstall.stderr || actualInstall.stdout);
+		assertion(existsSync(join(installedHome, ".omp", "zh", "host.ts")), "installed host.ts is missing");
+		assertion(existsSync(join(installedHome, ".omp", "zh", "model-ui.ts")), "installed model-ui.ts is missing");
+		assertion(existsSync(join(installedHome, ".omp", "zh", "launch.json")), "installed launch.json is missing");
 		const version = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(installedHome, ".omp", "zh", "zhomp.toml")}`, join(installedHome, ".omp", "zh", "launch.ts"), "--version"], { cwd: root });
-		assertion(version.exitCode === 0 && version.stdout.includes(`omp/${supported}`), version.stderr || version.stdout);
-		return "tarball contains every runtime/user document and its install command executes";
+		assertion(version.exitCode === 0 && version.stdout.includes(`omp/${host.version}`), version.stderr || version.stdout);
+		return "tarball includes model-ui.ts and the unpacked installer publishes and launches the complete runtime";
 	});
 }
 

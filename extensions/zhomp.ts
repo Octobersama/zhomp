@@ -1,16 +1,19 @@
 // OMP 中文汉化扩展（非破坏性，可插拔）
 //
-// 运行时只接受启动器验证过的宿主包：启动器通过环境变量传入绝对 packageDir
-// 和支持版本，扩展再从该 packageDir 的真实源码路径导入 all-settings 与相邻的
-// pi-tui settings-defs。这样改写的是 settings-ui 后续消费的同一模块对象。
+// 运行时通过启动器传入同目录的安装配置；扩展使用该安装随附的 host 契约
+// 重新验证宿主；preload 注册 Model 文案转换，扩展 factory 翻译 settings 元数据。
 
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { HostPackage, LaunchConfig } from "../runtime/host";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type ObjectRecord = Record<string, unknown>;
+
+interface InstalledHostModule {
+	readLaunchConfig(configPath: string): LaunchConfig;
+}
 
 export type Dictionary = Readonly<Record<string, string>>;
 
@@ -72,25 +75,8 @@ function translateText(dictionary: Dictionary, source: string): string {
 	return typeof translated === "string" && translated.length > 0 ? translated : source;
 }
 
-function resolveHome(environment: Environment): string {
-	const candidates = [
-		environment.OMP_ZH_HOME,
-		process.platform === "win32" ? environment.USERPROFILE : undefined,
-		environment.HOME,
-		homedir(),
-	];
-	return candidates.find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0) ?? homedir();
-}
-
-function resolveDictionaryPath(environment: Environment): string {
-	const explicit = environment.OMP_ZH_DICT;
-	return explicit && explicit.length > 0
-		? explicit
-		: join(resolveHome(environment), ".omp", "zh", "dict.json");
-}
-
-function loadDictionary(environment: Environment): Dictionary {
-	const dictionaryPath = resolveDictionaryPath(environment);
+function loadDictionary(environment: Environment, defaultPath: string): Dictionary {
+	const dictionaryPath = environment.OMP_ZH_DICT || defaultPath;
 	if (!existsSync(dictionaryPath)) {
 		console.log(`[zhomp] dict.json 不存在: ${dictionaryPath}（跳过汉化）`);
 		return {};
@@ -117,72 +103,19 @@ function loadDictionary(environment: Environment): Dictionary {
 	return dictionary;
 }
 
-interface PackageMetadata {
-	version: string;
-	dependencies?: Record<string, unknown>;
-}
-
-function readPackageMetadata(packageDir: string): PackageMetadata | undefined {
-	try {
-		const value: unknown = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
-		if (isRecord(value) && typeof value.version === "string" && value.version.length > 0) {
-			return { version: value.version, dependencies: isRecord(value.dependencies) ? value.dependencies : undefined };
-		}
-	} catch {
-		// The caller reports the missing package identity with its path.
-	}
-	return undefined;
-}
-
-interface HostPackage {
-	packageDir: string;
-	tuiPackageDir: string;
-	supportedVersion: string;
-}
-
-function resolveHostPackage(environment: Environment): HostPackage {
-	const packageDirValue = environment.OMP_ZH_PACKAGE_DIR;
-	if (!packageDirValue || !isAbsolute(packageDirValue)) {
-		throw new Error("OMP_ZH_PACKAGE_DIR must be an absolute validated host package path");
-	}
-	const tuiPackageDirValue = environment.OMP_ZH_TUI_PACKAGE_DIR;
-	if (!tuiPackageDirValue || !isAbsolute(tuiPackageDirValue)) {
-		throw new Error("OMP_ZH_TUI_PACKAGE_DIR must be an absolute validated TUI package path");
-	}
-	const supportedVersion = environment.OMP_ZH_SUPPORTED_VERSION;
-	if (!supportedVersion || supportedVersion.length === 0) throw new Error("OMP_ZH_SUPPORTED_VERSION is required");
-	const packageDir = resolve(packageDirValue);
-	const packageMetadata = readPackageMetadata(packageDir);
-	if (!packageMetadata) throw new Error(`Host package identity is unavailable: ${packageDir}`);
-	if (packageMetadata.version !== supportedVersion) {
-		throw new Error(`Unsupported host version: expected ${supportedVersion}, found ${packageMetadata.version}`);
-	}
-	const tuiPackageDir = resolve(tuiPackageDirValue);
-	const tuiMetadata = readPackageMetadata(tuiPackageDir);
-	if (!tuiMetadata) throw new Error(`TUI package identity is unavailable: ${tuiPackageDir}`);
-	const tuiRange = packageMetadata.dependencies?.["@oh-my-pi/pi-tui"];
-	if (typeof tuiRange !== "string" || !Bun.semver.satisfies(tuiMetadata.version, tuiRange)) {
-		throw new Error(`Mismatched TUI version: expected ${String(tuiRange)}, found ${tuiMetadata.version}`);
-	}
-	return { packageDir, tuiPackageDir, supportedVersion };
-}
-
 interface LoadedHost extends TranslationHost {
-	supportedVersion: string;
+	version: string;
 }
 
 function isOrderedSettings(value: unknown): value is () => readonly unknown[] {
 	return typeof value === "function";
 }
 
-async function loadHost(packageInfo: HostPackage): Promise<LoadedHost> {
-	const allSettingsPath = join(packageInfo.packageDir, "src", "config", "all-settings.ts");
-	const settingsDefsPath = join(packageInfo.tuiPackageDir, "src", "overlays", "settings-defs.ts");
-	if (!existsSync(allSettingsPath)) throw new Error(`Host all-settings source is unavailable: ${allSettingsPath}`);
-	if (!existsSync(settingsDefsPath)) throw new Error(`TUI settings definitions are unavailable: ${settingsDefsPath}`);
+async function loadHost(hostPackage: HostPackage): Promise<LoadedHost> {
+	// These absolute module paths are resolved from the host selected by launch config.
 	const [allSettingsModule, settingsDefsModule] = await Promise.all([
-		import(pathToFileURL(allSettingsPath).href),
-		import(pathToFileURL(settingsDefsPath).href),
+		import(pathToFileURL(hostPackage.allSettingsPath).href),
+		import(pathToFileURL(hostPackage.settingsDefsPath).href),
 	]);
 	const allSettings = allSettingsModule as ObjectRecord;
 	const settingsDefs = settingsDefsModule as ObjectRecord;
@@ -193,7 +126,7 @@ async function loadHost(packageInfo: HostPackage): Promise<LoadedHost> {
 		orderedSettings: allSettings.orderedSettings,
 		tabMetadata: settingsDefs.TAB_METADATA,
 		tabGroups: settingsDefs.TAB_GROUPS,
-		supportedVersion: packageInfo.supportedVersion,
+		version: hostPackage.version,
 	};
 }
 
@@ -308,12 +241,59 @@ function validateHost(host: TranslationHost): ValidatedHost {
 	return { settings, tabMetadata: metadata, tabGroups };
 }
 
+interface LiveGetterTranslation {
+	dictionary: Dictionary;
+}
+
+const liveGetterTranslations = new WeakMap<() => unknown, LiveGetterTranslation>();
+
+/** Reject unsupported readonly metadata before the first in-place update. */
+function assertTranslatable(target: ObjectRecord, key: string, dictionary: Dictionary): void {
+	const descriptor = Object.getOwnPropertyDescriptor(target, key);
+	if (descriptor?.get && descriptor.configurable) return;
+	const source = target[key];
+	if (typeof source !== "string" || translateText(dictionary, source) === source) return;
+	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
+		throw new Error(`Unsupported readonly settings metadata: ${key}`);
+	}
+}
 
 function increment(target: ObjectRecord, key: string, dictionary: Dictionary, count: () => void): void {
+	const descriptor = Object.getOwnPropertyDescriptor(target, key);
+	if (descriptor?.get) {
+		if (!descriptor.configurable) return;
+		const existingTranslation = liveGetterTranslations.get(descriptor.get);
+		if (existingTranslation) {
+			existingTranslation.dictionary = dictionary;
+			return;
+		}
+
+		const original = descriptor.get;
+		const translation = { dictionary };
+		const source: unknown = original.call(target);
+		const translated = typeof source === "string" ? translateText(dictionary, source) : source;
+		const getter = function (this: unknown): unknown {
+			const current: unknown = original.call(this);
+			return typeof current === "string" ? translateText(translation.dictionary, current) : current;
+		};
+		Object.defineProperty(target, key, {
+			configurable: true,
+			enumerable: descriptor.enumerable,
+			get: getter,
+			set: descriptor.set,
+		});
+		liveGetterTranslations.set(getter, translation);
+		if (typeof source === "string" && translated !== source) count();
+		return;
+	}
+
 	const source = target[key];
 	if (typeof source !== "string") return;
 	const translated = translateText(dictionary, source);
 	if (translated === source) return;
+	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
+		throw new Error(`Unsupported readonly settings metadata: ${key}`);
+	}
 	target[key] = translated;
 	count();
 }
@@ -335,6 +315,29 @@ function makeCounts(): Omit<TranslationCounts, "total"> & { total: number } {
 export function translateSettings(host: TranslationHost, dictionary: Dictionary): TranslationCounts {
 	const validated = validateHost(host);
 	const counts = makeCounts();
+	// Validate every field first so a future readonly UI shape cannot leave
+	// translated tab/group names paired with untranslated setting metadata.
+	for (const tab of Object.values(validated.tabMetadata)) {
+		if (isRecord(tab)) assertTranslatable(tab, "label", dictionary);
+	}
+	for (const groups of Object.values(validated.tabGroups)) {
+		for (let index = 0; index < groups.length; index++) {
+			if (translateText(dictionary, groups[index]) !== groups[index] && !Object.getOwnPropertyDescriptor(groups, String(index))?.writable) {
+				throw new Error("Unsupported readonly settings metadata: TAB_GROUPS");
+			}
+		}
+	}
+	for (const setting of validated.settings) {
+		const ui = setting.ui;
+		if (!ui) continue;
+		for (const field of ["label", "description", "warning", "group"]) assertTranslatable(ui.object, field, dictionary);
+		if (Array.isArray(ui.options)) {
+			for (const option of ui.options) {
+				assertTranslatable(option.object, "label", dictionary);
+				assertTranslatable(option.object, "description", dictionary);
+			}
+		}
+	}
 	for (const key of Object.keys(validated.tabMetadata)) {
 		const tab = validated.tabMetadata[key];
 		if (!isRecord(tab)) invalidHost(`TAB_METADATA.${key} became invalid during translation`);
@@ -380,17 +383,41 @@ export function isTranslationEnabled(environment: Environment = process.env): bo
 	return environment.OMP_ZH_ENABLED === "1" && environment.OMP_ZH_PROCESS_ID === String(process.pid);
 }
 
+/** Register before the host extension loader imports its component barrel. */
+export async function prepareModelTranslation(launchConfig: LaunchConfig, configPath: string): Promise<void> {
+	if (!isTranslationEnabled()) return;
+	try {
+		const dictionary = loadDictionary(process.env, launchConfig.dictPath);
+		if (Object.keys(dictionary).length === 0) return;
+		const modelUiPath = join(dirname(configPath), "model-ui.ts");
+		const modelUi: unknown = await import(pathToFileURL(modelUiPath).href);
+		if (!isRecord(modelUi) || typeof modelUi.registerModelTranslation !== "function") {
+			throw new Error("Installed Model translation module is unavailable; reinstall zhomp");
+		}
+		modelUi.registerModelTranslation(launchConfig.host.modelHubPath, dictionary);
+	} catch (error) {
+		console.log(`[zhomp] Model 汉化跳过: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
 export default async function (_pi: unknown): Promise<void> {
 	if (!isTranslationEnabled()) return;
 	try {
 		const environment = process.env;
-		const packageInfo = resolveHostPackage(environment);
-		const dictionary = loadDictionary(environment);
+		const configPath = environment.OMP_ZH_CONFIG;
+		if (!configPath || !isAbsolute(configPath)) {
+			throw new Error("OMP_ZH_CONFIG must be an absolute launch config path");
+		}
+		// The installed host module is selected at runtime by the launcher's config path.
+		const hostModulePath = join(dirname(configPath), "host.ts");
+		const hostModule = await import(pathToFileURL(hostModulePath).href) as InstalledHostModule;
+		const launchConfig = hostModule.readLaunchConfig(configPath);
+		const dictionary = loadDictionary(environment, launchConfig.dictPath);
 		if (Object.keys(dictionary).length === 0) return;
-		const host = await loadHost(packageInfo);
+		const host = await loadHost(launchConfig.host);
 		const counts = translateSettings(host, dictionary);
 		console.log(
-			`[zhomp] 汉化完成: tab ${counts.tabLabels}, label ${counts.labels}, description ${counts.descriptions}, warning ${counts.warnings}, group ${counts.groups}, option 文本 ${counts.optionLabels + counts.optionDescriptions}（字典 ${Object.keys(dictionary).length} 条，宿主 ${host.supportedVersion}）`,
+			`[zhomp] 汉化完成: tab ${counts.tabLabels}, label ${counts.labels}, description ${counts.descriptions}, warning ${counts.warnings}, group ${counts.groups}, option 文本 ${counts.optionLabels + counts.optionDescriptions}（字典 ${Object.keys(dictionary).length} 条，宿主 ${host.version}）`,
 		);
 	} catch (error) {
 		console.log(`[zhomp] 汉化失败: ${error instanceof Error ? error.message : String(error)}`);

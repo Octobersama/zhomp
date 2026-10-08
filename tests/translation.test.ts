@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert";
 import { describe, test } from "bun:test";
 import {
 	isTranslationEnabled,
@@ -76,6 +76,8 @@ describe("translation boundary", () => {
 		const groups = host.tabGroups as { appearance: string[] };
 		const groupArray = groups.appearance;
 		const optionObject = optionList[0];
+		const secondOptionObject = optionList[1];
+		const optionValues = optionList.map(option => option.value);
 
 		const counts = translateSettings(host, {
 			Appearance: "外观",
@@ -100,6 +102,9 @@ describe("translation boundary", () => {
 		strictEqual(groupArray, groupList);
 		strictEqual(optionList, setting.ui.options);
 		strictEqual(optionList[0], optionObject);
+		strictEqual(optionList[1], secondOptionObject);
+		strictEqual(optionList[0].value, optionValues[0]);
+		strictEqual(optionList[1].value, optionValues[1]);
 		strictEqual(tab.appearance.label, "外观");
 		strictEqual(groupList[0], "通用");
 		strictEqual(setting.ui.group, "通用");
@@ -161,5 +166,58 @@ describe("translation boundary", () => {
 		notStrictEqual(error, undefined);
 		strictEqual(tab.appearance.label, beforeTab);
 		strictEqual(groups.appearance[0], beforeGroup);
+	});
+
+	test("keeps dynamic descriptions live and avoids partial translation on a locked field", () => {
+		const { host, setting, groupList } = createFixture();
+		let shortcut = "Esc";
+		Object.defineProperty(setting.ui, "description", {
+			configurable: true,
+			enumerable: true,
+			get() { return `Press ${shortcut} to cancel`; },
+		});
+		const dict = { Appearance: "外观", General: "通用", "Press Esc to cancel": "按 Esc 取消", "Press Ctrl+C to cancel": "按 Ctrl+C 取消" };
+		translateSettings(host, dict);
+		strictEqual(setting.ui.description, "按 Esc 取消");
+		shortcut = "Ctrl+C";
+		strictEqual(setting.ui.description, "按 Ctrl+C 取消");
+		strictEqual(translateSettings(host, dict).total, 0);
+		const locked = createFixture();
+		Object.defineProperty(locked.setting.ui, "description", { value: "Choose a theme", configurable: false, writable: false });
+		throws(() => translateSettings(locked.host, { Appearance: "外观", General: "通用", "Choose a theme": "选择主题" }));
+		const lockedTab = locked.host.tabMetadata;
+		if (!lockedTab || typeof lockedTab !== "object" || !("appearance" in lockedTab)) throw new Error("missing tab metadata");
+		const appearance = lockedTab.appearance;
+		if (!appearance || typeof appearance !== "object" || !("label" in appearance)) throw new Error("missing tab label");
+		strictEqual(appearance.label, "Appearance");
+		strictEqual(locked.groupList[0], "General");
+		strictEqual(groupList[0], "通用");
+	});
+	test("keeps a configurable getter live after an initial dictionary miss", () => {
+		const { host, setting } = createFixture();
+		let description = "Unlisted";
+		const getter = (): string => description;
+		Object.defineProperty(setting.ui, "description", {
+			configurable: true,
+			enumerable: true,
+			get: getter,
+		});
+		const dictionary = {
+			Appearance: "外观",
+			General: "通用",
+			"Press Esc to cancel": "按 Esc 取消",
+		};
+
+		translateSettings(host, dictionary);
+		const installedGetter = Object.getOwnPropertyDescriptor(setting.ui, "description")?.get;
+		notStrictEqual(installedGetter, getter);
+		strictEqual(setting.ui.description, "Unlisted");
+
+		translateSettings(host, dictionary);
+		strictEqual(Object.getOwnPropertyDescriptor(setting.ui, "description")?.get, installedGetter);
+		description = "Press Esc to cancel";
+		strictEqual(setting.ui.description, "按 Esc 取消");
+		description = "Unlisted";
+		strictEqual(setting.ui.description, "Unlisted");
 	});
 });

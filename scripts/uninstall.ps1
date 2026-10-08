@@ -20,7 +20,9 @@ $OwnedFiles = @(
 	(Join-Path $HomeDir ".omp\agent\extensions\zhomp.ts"),
 	(Join-Path $ZhDir "dict.json"),
 	(Join-Path $ZhDir "launch.ts"),
+	(Join-Path $ZhDir "host.ts"),
 	(Join-Path $ZhDir "launch.json"),
+	(Join-Path $ZhDir "model-ui.ts"),
 	(Join-Path $ZhDir "zhomp.toml"),
 	(Join-Path $HomeDir ".bun\bin\zhomp"),
 	(Join-Path $HomeDir ".bun\bin\zhomp.cmd")
