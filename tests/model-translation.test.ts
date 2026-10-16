@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import { describe, test } from "bun:test";
 import { discoverPackage } from "../scripts/install-core";
 import { readSupportPolicy } from "../runtime/host";
-import { translateModelHubSource } from "../runtime/model-ui";
+import {
+	registerModelTranslation,
+	setModelTranslationDiagnosticReporter,
+	translateModelHubSource,
+} from "../runtime/model-ui";
 import { parseDictionaryText } from "../extensions/zhomp";
 import type { Dictionary } from "../extensions/zhomp";
 import { makeTempDir, removeTree, runCommand, writeText } from "./verification-fixtures";
@@ -21,6 +25,42 @@ describe("ModelHub translation fail-closed behavior", () => {
 		strictEqual(translated.supported, true);
 		strictEqual(translated.translated, 0);
 		strictEqual(translated.source, modelHubSource);
+	});
+
+
+	test("delivers queued model diagnostics exactly once across reporter changes", () => {
+		const received: string[] = [];
+		let failedAttempts = 0;
+		function receiveDiagnostic(message: string): void {
+			received.push(message);
+		}
+		function rejectDiagnostic(_message: string): void {
+			failedAttempts++;
+			throw new Error();
+		}
+		try {
+			setModelTranslationDiagnosticReporter(undefined);
+			registerModelTranslation("relative/model-hub.ts", {});
+			strictEqual(received.length, 0);
+			setModelTranslationDiagnosticReporter(receiveDiagnostic);
+			strictEqual(received.length, 1);
+			setModelTranslationDiagnosticReporter(receiveDiagnostic);
+			strictEqual(received.length, 1);
+			registerModelTranslation("relative/active-model-hub.ts", {});
+			strictEqual(received.length, 2);
+			setModelTranslationDiagnosticReporter(undefined);
+			registerModelTranslation("relative/retry-model-hub.ts", {});
+			strictEqual(received.length, 2);
+			setModelTranslationDiagnosticReporter(rejectDiagnostic);
+			strictEqual(failedAttempts, 1);
+			strictEqual(received.length, 2);
+			setModelTranslationDiagnosticReporter(receiveDiagnostic);
+			strictEqual(received.length, 3);
+			setModelTranslationDiagnosticReporter(receiveDiagnostic);
+			strictEqual(received.length, 3);
+		} finally {
+			setModelTranslationDiagnosticReporter(undefined);
+		}
 	});
 
 	test("skips an unknown module shape without changing its source", () => {

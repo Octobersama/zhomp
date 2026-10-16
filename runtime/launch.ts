@@ -59,13 +59,13 @@ async function preload(configPath: string, cwd: string): Promise<void> {
 				throw new Error("The OMP argument parser returned an invalid extension flag.");
 			}
 			if (!noExtensions) {
-				// The host extension loader eagerly imports ModelHub; register before the CLI starts.
+				// Register display transforms before the host CLI imports their consumers.
 				const extension: unknown = await import(pathToFileURL(config.extensionPath).href);
 				if (extension === null || typeof extension !== "object" ||
-					!("prepareModelTranslation" in extension) || typeof extension.prepareModelTranslation !== "function") {
-					throw new Error("Installed Model translation preload is unavailable; reinstall zhomp.");
+					!("preparePreloadDisplayTranslations" in extension) || typeof extension.preparePreloadDisplayTranslations !== "function") {
+					throw new Error("Installed display translation preload is unavailable; reinstall zhomp.");
 				}
-				await extension.prepareModelTranslation(config, configPath);
+				await extension.preparePreloadDisplayTranslations(config, configPath);
 				// Insert before the user's `--` boundary; the host still applies its normal routing.
 				process.argv.splice(2, 0, "--extension", config.extensionPath);
 			}

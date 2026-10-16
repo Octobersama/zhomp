@@ -161,6 +161,7 @@ async function v06(): Promise<string> {
 		const { packageDir } = await installFixture(root, home);
 		const config = JSON.parse(readFileSync(join(home, ".omp", "zh", "launch.json"), "utf8")) as Record<string, unknown>;
 		assertion(existsSync(join(home, ".omp", "zh", "host.ts")), "host.ts was not installed");
+		assertion(existsSync(join(home, ".omp", "zh", "settings-ui.ts")), "settings-ui.ts was not installed");
 		assertion(typeof config.extensionPath === "string" && config.extensionPath.startsWith(home), "extension path escaped custom home");
 		assertion(typeof config.dictPath === "string" && config.dictPath.startsWith(home), "dictionary path escaped custom home");
 		assertion(config.packageDir === packageDir, "host package path was not persisted");
@@ -174,7 +175,7 @@ async function v06(): Promise<string> {
 		assertion(result.exitCode === 0, result.stderr);
 		const observed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
 		assertion(observed.dict === custom, "explicit relative dictionary did not take precedence");
-		return "custom home owns extension, dictionary and launch configuration";
+		return "custom home owns extension, dictionary, launch configuration, and settings UI runtime";
 	});
 }
 
@@ -208,6 +209,8 @@ async function v09(): Promise<string> {
 			const installed = await installFixture(join(root, shell), home);
 			const installedHost = join(home, ".omp", "zh", "host.ts");
 			assertion(installed.paths.includes(installedHost), "host.ts is missing from the uninstall manifest");
+			const installedSettingsUi = join(home, ".omp", "zh", "settings-ui.ts");
+			assertion(installed.paths.includes(installedSettingsUi), "settings-ui.ts is missing from the uninstall manifest");
 			writeText(join(home, ".omp", "zh", "user.txt"), "keep");
 			writeText(join(home, ".omp", "zh", ".hidden"), "hidden");
 			writeText(join(home, ".omp", "zh", "child", "nested"), "nested");
@@ -236,6 +239,7 @@ async function v10(): Promise<string> {
 		assertion(installed.packageDir === discovered.packageDir, "real host installation selected a different package");
 		const installDir = join(home, ".omp", "zh");
 		assertion(existsSync(join(installDir, "model-ui.ts")), "installed model-ui.ts is missing");
+		assertion(existsSync(join(installDir, "settings-ui.ts")), "installed settings-ui.ts is missing");
 		const configPath = join(installDir, "launch.json");
 		const command = ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-model-surface.ts")];
 		const env = {
@@ -253,10 +257,31 @@ async function v10(): Promise<string> {
 			env,
 		});
 		assertion(settingsSurface.exitCode === 0, settingsSurface.stderr || settingsSurface.stdout);
-		assertion(!settingsSurface.stdout.includes("[zhomp] 汉化失败"), settingsSurface.stdout);
-		assertion(settingsSurface.stdout.includes("[zhomp] 汉化完成") && settingsSurface.stdout.includes('"loader":true') && settingsSurface.stdout.includes('"component":"SettingsSelectorComponent"'), "real settings loader did not confirm the translated SettingsSelector component");
-		const outputs: string[] = [];
-		outputs.push(settingsSurface.stdout.trim());
+		const settingsSurfaceData: unknown = JSON.parse(settingsSurface.stdout.trim());
+		assertion(
+			settingsSurfaceData !== null && typeof settingsSurfaceData === "object" && !Array.isArray(settingsSurfaceData),
+			"real settings integration must emit a clean structured surface result",
+		);
+		assertion(
+			"loader" in settingsSurfaceData && settingsSurfaceData.loader === true &&
+			"component" in settingsSurfaceData && settingsSurfaceData.component === "SettingsSelectorComponent" &&
+			"label" in settingsSurfaceData && settingsSurfaceData.label === "深色主题",
+			"real settings selector must surface translated UI text",
+		);
+		assertion(
+			"slash" in settingsSurfaceData && settingsSurfaceData.slash !== null &&
+			typeof settingsSurfaceData.slash === "object" && !Array.isArray(settingsSurfaceData.slash),
+			"real extension lifecycle must surface its slash autocomplete result",
+		);
+		const slashSurface = settingsSurfaceData.slash;
+		assertion(
+			"registered" in slashSurface && slashSurface.registered === true &&
+			"description" in slashSurface && typeof slashSurface.description === "string" && slashSurface.description !== "Open settings menu" &&
+			"accepted" in slashSurface && slashSurface.accepted === "/settings " &&
+			"errorNotification" in slashSurface && slashSurface.errorNotification === true,
+			"real slash UI must translate display text, preserve the selected command, and surface failures via UI notification",
+		);
+		const outputs: string[] = [JSON.stringify(settingsSurfaceData)];
 		for (const mode of ["ordinary", "translated", "hostile"] as const) {
 			const result = await runCommand(bun, command, {
 				cwd: discovered.packageDir,
@@ -264,23 +289,41 @@ async function v10(): Promise<string> {
 				timeout: 120_000,
 			});
 			assertion(result.exitCode === 0, result.stderr || result.stdout);
-			assertion(!result.stdout.includes("[zhomp] 汉化失败"), result.stdout);
-			assertion(result.stdout.includes(`"mode":"${mode}"`) && result.stdout.includes('"component":"ModelHubComponent"'), `V10 ${mode} process did not confirm the real ModelHub component`);
-			assertion(result.stdout.includes('"unrelatedConsumer":"ModelBrowser remains English"'), `V10 ${mode} process globally translated the sibling ModelBrowser`);
-			assertion(result.stdout.includes('"roleTag":"SMOL"'), "ModelHub must preserve builtin role names in every language mode");
+			const modelSurface: unknown = JSON.parse(result.stdout.trim());
+			assertion(modelSurface !== null && typeof modelSurface === "object" && !Array.isArray(modelSurface), `V10 ${mode} must emit a clean structured ModelHub surface result`);
+			assertion(
+				"mode" in modelSurface && modelSurface.mode === mode &&
+				"component" in modelSurface && modelSurface.component === "ModelHubComponent",
+				`V10 ${mode} did not surface the real ModelHub component`,
+			);
+			assertion(
+				"unrelatedConsumer" in modelSurface && modelSurface.unrelatedConsumer === "ModelBrowser remains English",
+				`V10 ${mode} globally translated the sibling ModelBrowser`,
+			);
+			assertion("roleTag" in modelSurface && modelSurface.roleTag === "SMOL", "ModelHub must preserve builtin role names in every language mode");
+			const title = "title" in modelSurface ? modelSurface.title : undefined;
 			if (mode === "ordinary") {
-				assertion(result.stdout.includes('"title":"Models"') && result.stdout.includes('"roleTag":"SMOL"'), "the mismatched-PID process must retain the original ModelHub text");
+				assertion(title === "Models", "the mismatched-PID process must retain the original ModelHub text");
 			} else {
-				assertion(result.stdout.includes("[zhomp] 汉化完成"), result.stdout);
-				assertion(result.stdout.includes('"configWrites":0'), "the translated probe must not persist user settings");
-				assertion(result.stdout.includes(`"nativeDescribe":"covered@${discovered.version}"`) || result.stdout.includes(`"nativeDescribe":"unavailable@${discovered.version}"`), `native describe capability evidence is missing for OMP ${discovered.version}`);
+				assertion(typeof title === "string" && title !== "Models", "the real ModelHub title must display the dictionary text");
+				assertion("configWrites" in modelSurface && modelSurface.configWrites === 0, "the translated probe must not persist user settings");
+				const nativeDescribe = "nativeDescribe" in modelSurface ? modelSurface.nativeDescribe : undefined;
+				assertion(
+					typeof nativeDescribe === "string" &&
+					(nativeDescribe === `covered@${discovered.version}` || nativeDescribe === `unavailable@${discovered.version}`),
+					`native describe capability evidence is missing for OMP ${discovered.version}`,
+				);
 				if (mode === "hostile") {
-					assertion(result.stdout.includes("__zhompModelUiInjected") && result.stdout.includes('"injectionSideEffect":false'), "hostile dictionary text was not displayed literally or caused code execution");
+					assertion(
+						typeof title === "string" && title.includes("__zhompModelUiInjected") &&
+						"injectionSideEffect" in modelSurface && modelSurface.injectionSideEffect === false,
+						"hostile dictionary text must remain literal and side-effect free",
+					);
 				} else {
-					assertion(result.stdout.includes('"model":"Models/Roles"'), "the real ModelHub consumer changed model or selector identities");
+					assertion("model" in modelSurface && modelSurface.model === "Models/Roles", "the real ModelHub consumer changed model or selector identities");
 				}
 			}
-			outputs.push(result.stdout.trim());
+			outputs.push(JSON.stringify(modelSurface));
 		}
 		return outputs.join("\n");
 	});

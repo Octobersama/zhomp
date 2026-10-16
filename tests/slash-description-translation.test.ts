@@ -38,6 +38,7 @@ interface SlashCommand {
 interface SlashDescription {
 	name: string;
 	description?: string;
+	argumentHint?: string;
 	subcommands?: readonly SlashDescription[];
 	aliases?: readonly string[];
 }
@@ -487,6 +488,37 @@ describe("builtin slash description translation", () => {
 			assertSameSelection(base, translated);
 			strictEqual(rowOrThrow(translated, value, `/autoresearch ${value}`).description, dictionary[key]);
 		}
+	});
+
+	test("preserves unknown command wording and translates only the host argument-hint format", async () => {
+		const { autocomplete } = await loadHostAutocomplete();
+		const canonical = "Generate AGENTS.md for current codebase";
+		const argumentHint = "<path>";
+		const definitions: SlashDescription[] = [{ name: "init", description: canonical, argumentHint }];
+		const unknownDescription = `Custom workflow - ${canonical}`;
+		const unknownProvider = new autocomplete.CombinedAutocompleteProvider(
+			[{ name: "init", description: unknownDescription }],
+			repoDir,
+		);
+		const unknownWrapped = wrapProvider(unknownProvider, definitions);
+		const baseUnknown = resultOrThrow(unknownProvider.trySyncSlashCompletion("/"), "custom /init description");
+		const translatedUnknown = resultOrThrow(unknownWrapped.trySyncSlashCompletion("/"), "wrapped custom /init description");
+		assertSameSelection(baseUnknown, translatedUnknown);
+		strictEqual(rowOrThrow(translatedUnknown, "init", "custom /init").description, unknownDescription);
+
+		const hintedProvider = new autocomplete.CombinedAutocompleteProvider(
+			[{ name: "init", description: canonical, argumentHint }],
+			repoDir,
+		);
+		const hintedWrapped = wrapProvider(hintedProvider, definitions);
+		const baseHinted = resultOrThrow(hintedProvider.trySyncSlashCompletion("/"), "host argument-hint /init");
+		const translatedHinted = resultOrThrow(hintedWrapped.trySyncSlashCompletion("/"), "wrapped host argument-hint /init");
+		assertSameSelection(baseHinted, translatedHinted);
+		strictEqual(rowOrThrow(baseHinted, "init", "host argument-hint /init").description, `${argumentHint} - ${canonical}`);
+		strictEqual(
+			rowOrThrow(translatedHinted, "init", "translated host argument-hint /init").description,
+			`${argumentHint} - ${dictionary[canonical]}`,
+		);
 	});
 
 	test("native static detail translates while a real model-state callback stays intact", async () => {

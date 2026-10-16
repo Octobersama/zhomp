@@ -17,6 +17,162 @@ interface InstalledHostModule {
 
 export type Dictionary = Readonly<Record<string, string>>;
 
+interface InstalledModelUiModule {
+	setModelTranslationDiagnosticReporter(reporter: ((message: string) => void) | undefined): void;
+}
+
+interface InstalledSettingsUiModule {
+	registerSettingsUiTranslation(settingsUiPath: string, dictionary: Dictionary): void;
+	setSettingsUiTranslationDiagnosticReporter(reporter: ((message: string) => void) | undefined): void;
+	reportSettingsUiTranslationDiagnostic(message: string): void;
+}
+
+interface SettingDescriptionTemplate {
+	key: string;
+	parts: readonly string[];
+	captures: readonly string[];
+}
+
+/** Exact initialized description shapes; only their rendered key hints vary. */
+const SETTING_DESCRIPTION_TEMPLATES: readonly SettingDescriptionTemplate[] = [
+	{
+		key: "Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until {escape}",
+		parts: ["Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until ", ""],
+		captures: ["escape"],
+	},
+	{
+		key: "Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+		parts: [
+			"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes ",
+			"+drag and wheel scroll becomes ",
+			"+wheel while on",
+		],
+		captures: ["shift", "shift"],
+	},
+	{
+		key: "Modal prompt editing. {escape} leaves Insert mode; Normal mode has hjkl, 0, $, ^, w, b, e, gg, G, counts, x/D/C, dd/yy, p and u; operators take motions or text objects (diw, ca(, dap); v/V start a Visual selection that y copies and d deletes",
+		parts: [
+			"Modal prompt editing. ",
+			" leaves Insert mode; Normal mode has hjkl, 0, $, ^, w, b, e, gg, G, counts, x/D/C, dd/yy, p and u; operators take motions or text objects (diw, ca(, dap); v/V start a Visual selection that y copies and d deletes",
+		],
+		captures: ["escape"],
+	},
+	{
+		key: "Keep drafts cleared with {ctrlC} in local {upDown} history until exit; disabling affects future clears",
+		parts: ["Keep drafts cleared with ", " in local ", " history until exit; disabling affects future clears"],
+		captures: ["ctrlC", "upDown"],
+	},
+	{
+		key: "What pressing {escape} twice with an empty editor does: open the transcript rewind selector, open the session tree, or nothing",
+		parts: ["What pressing ", " twice with an empty editor does: open the transcript rewind selector, open the session tree, or nothing"],
+		captures: ["escape"],
+	},
+	{
+		key: "Show predicted word completions as inline hints: {tab} accepts with a space, {right} without",
+		parts: ["Show predicted word completions as inline hints: ", " accepts with a space, ", " without"],
+		captures: ["tab", "right"],
+	},
+	{
+		key: "After a completed turn, ask the active model to predict your next message and show it as ghost text in the empty composer; {tab} or {right} inserts it without sending. Extra usage: every completed turn sends one more billed request over the whole conversation (counted in /stats)",
+		parts: [
+			"After a completed turn, ask the active model to predict your next message and show it as ghost text in the empty composer; ",
+			" or ",
+			" inserts it without sending. Extra usage: every completed turn sends one more billed request over the whole conversation (counted in /stats)",
+		],
+		captures: ["tab", "right"],
+	},
+	{
+		key: "When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
+		parts: [
+			"When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable (",
+			") but also hold subagents, so leave off for unattended runs.",
+		],
+		captures: ["escape"],
+	},
+];
+
+/** Ignore ANSI SGR only for shape checks; returned captures keep the original bytes. */
+function isRenderedKeyFragment(name: string, value: string): boolean {
+	const plainText = value.replace(/\x1b\[[0-9;:]*m/g, "");
+	if (plainText.length === 0 || plainText.length > 24) return false;
+	if (name === "ctrlC") return /^[^\s+]{1,12}[+ ]?C$/.test(plainText);
+	if (name === "upDown") return /^[^/\s]{1,12}\/[^/\s]{1,12}$/.test(plainText);
+	return !/\s/.test(plainText);
+}
+
+function matchDescriptionTemplate(source: string, template: SettingDescriptionTemplate): string[] | undefined {
+	const first = template.parts[0];
+	if (first === undefined || !source.startsWith(first) || template.parts.length !== template.captures.length + 1) return undefined;
+	const captures: string[] = [];
+	let offset = first.length;
+	for (let index = 0; index < template.captures.length; index++) {
+		const suffix = template.parts[index + 1];
+		if (suffix === undefined) return undefined;
+		let end: number;
+		if (suffix === "" && index === template.captures.length - 1) end = source.length;
+		else end = source.indexOf(suffix, offset);
+		if (end <= offset) return undefined;
+		const captured = source.slice(offset, end);
+		const name = template.captures[index];
+		if (name === undefined || !isRenderedKeyFragment(name, captured)) return undefined;
+		for (let previous = 0; previous < index; previous++) {
+			if (template.captures[previous] === name && captures[previous] !== captured) return undefined;
+		}
+		captures.push(captured);
+		offset = end + suffix.length;
+	}
+	return offset === source.length ? captures : undefined;
+}
+
+function renderDescriptionTemplate(
+	dictionary: Dictionary,
+	template: SettingDescriptionTemplate,
+	captures: readonly string[],
+): string | undefined {
+	const translated = dictionary[template.key];
+	if (typeof translated !== "string" || translated.length === 0 || translated === template.key) return undefined;
+	for (let index = 0; index < template.captures.length; index++) {
+		const name = template.captures[index];
+		if (name === undefined || template.captures.indexOf(name) !== index) continue;
+		let expectedCount = 0;
+		for (const captureName of template.captures) {
+			if (captureName === name) expectedCount++;
+		}
+		const placeholder = `{${name}}`;
+		let actualCount = 0;
+		let offset = 0;
+		while ((offset = translated.indexOf(placeholder, offset)) !== -1) {
+			actualCount++;
+			offset += placeholder.length;
+		}
+		if (actualCount !== expectedCount) return undefined;
+	}
+	let result = translated;
+	for (let index = 0; index < template.captures.length; index++) {
+		const name = template.captures[index];
+		const value = captures[index];
+		if (name !== undefined && value !== undefined) result = result.replaceAll(`{${name}}`, () => value);
+	}
+	return result;
+}
+
+function translateSettingDescription(dictionary: Dictionary, source: string): string {
+	for (const template of SETTING_DESCRIPTION_TEMPLATES) {
+		const captures = matchDescriptionTemplate(source, template);
+		if (!captures) continue;
+		const translated = renderDescriptionTemplate(dictionary, template, captures);
+		if (translated !== undefined) return translated;
+		break;
+	}
+	return translateText(dictionary, source);
+}
+
+function translateMetadataText(dictionary: Dictionary, key: string, source: string): string {
+	if (key === "description") return translateSettingDescription(dictionary, source);
+	return translateText(dictionary, source);
+}
+type DiagnosticReporter = (message: string, context?: unknown) => void;
+
 /** The host references consumed by the real settings overlay. */
 export interface TranslationHost {
 	orderedSettings: () => readonly unknown[];
@@ -75,32 +231,79 @@ function translateText(dictionary: Dictionary, source: string): string {
 	return typeof translated === "string" && translated.length > 0 ? translated : source;
 }
 
-function loadDictionary(environment: Environment, defaultPath: string): Dictionary {
+function loadDictionary(environment: Environment, defaultPath: string, report: DiagnosticReporter): Dictionary {
 	const dictionaryPath = environment.OMP_ZH_DICT || defaultPath;
 	if (!existsSync(dictionaryPath)) {
-		console.log(`[zhomp] dict.json 不存在: ${dictionaryPath}（跳过汉化）`);
+		report(`[zhomp] dict.json 不存在: ${dictionaryPath}（跳过汉化）`);
 		return {};
 	}
 	let text: string;
 	try {
 		text = readFileSync(dictionaryPath, "utf8");
 	} catch (error) {
-		console.log(`[zhomp] dict.json 读取失败: ${error instanceof Error ? error.message : String(error)}`);
+		report(`[zhomp] dict.json 读取失败: ${error instanceof Error ? error.message : String(error)}`);
 		return {};
 	}
 	let value: unknown;
 	try {
 		value = JSON.parse(text);
 	} catch (error) {
-		console.log(`[zhomp] dict.json 解析失败: ${error instanceof Error ? error.message : String(error)}`);
+		report(`[zhomp] dict.json 解析失败: ${error instanceof Error ? error.message : String(error)}`);
 		return {};
 	}
 	const dictionary = parseDictionary(value);
 	if (!dictionary) {
-		console.log("[zhomp] dict.json 根值非法（需要 JSON 对象，跳过汉化）");
+		report("[zhomp] dict.json 根值非法（需要 JSON 对象，跳过汉化）");
 		return {};
 	}
 	return dictionary;
+}
+
+function registerExtensionEvent(
+	apiValue: unknown,
+	event: string,
+	handler: (event: unknown, context: unknown) => void,
+): void {
+	if (!isRecord(apiValue)) throw new Error("Extension API is unavailable");
+	const on = Reflect.get(apiValue, "on", apiValue);
+	if (typeof on !== "function") throw new Error("Extension event registration is unavailable");
+	Reflect.apply(on, apiValue, [event, handler]);
+}
+
+function notifyUiError(context: unknown, message: string): boolean {
+	try {
+		if (!isRecord(context) || context.hasUI !== true) return false;
+		const ui = Reflect.get(context, "ui", context);
+		if (!isRecord(ui)) return false;
+		const notify = Reflect.get(ui, "notify", ui);
+		if (typeof notify !== "function") return false;
+		Reflect.apply(notify, ui, [message, "error"]);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function createUiDiagnosticReporter(apiValue: unknown): DiagnosticReporter {
+	const pending: string[] = [];
+	let activeContext: unknown;
+	const report: DiagnosticReporter = (message, context) => {
+		if (context !== undefined) activeContext = context;
+		if (!notifyUiError(context ?? activeContext, message)) pending.push(message);
+	};
+	registerExtensionEvent(apiValue, "session_start", (_event, context) => {
+		activeContext = context;
+		let remaining = 0;
+		for (let index = 0; index < pending.length; index++) {
+			const message = pending[index];
+			if (message !== undefined && !notifyUiError(context, message)) {
+				pending[remaining] = message;
+				remaining++;
+			}
+		}
+		pending.length = remaining;
+	});
+	return report;
 }
 
 interface LoadedHost extends TranslationHost {
@@ -259,7 +462,7 @@ function assertTranslatable(target: ObjectRecord, key: string, dictionary: Dicti
 	const descriptor = Object.getOwnPropertyDescriptor(target, key);
 	if (descriptor?.get && descriptor.configurable) return;
 	const source = target[key];
-	if (typeof source !== "string" || translateText(dictionary, source) === source) return;
+	if (typeof source !== "string" || translateMetadataText(dictionary, key, source) === source) return;
 	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
 		throw new Error(`Unsupported readonly settings metadata: ${key}`);
 	}
@@ -278,10 +481,10 @@ function increment(target: ObjectRecord, key: string, dictionary: Dictionary, co
 		const original = descriptor.get;
 		const translation = { dictionary };
 		const source: unknown = original.call(target);
-		const translated = typeof source === "string" ? translateText(dictionary, source) : source;
+		const translated = typeof source === "string" ? translateMetadataText(dictionary, key, source) : source;
 		const getter = function (this: unknown): unknown {
 			const current: unknown = original.call(this);
-			return typeof current === "string" ? translateText(translation.dictionary, current) : current;
+			return typeof current === "string" ? translateMetadataText(translation.dictionary, key, current) : current;
 		};
 		Object.defineProperty(target, key, {
 			configurable: true,
@@ -296,7 +499,7 @@ function increment(target: ObjectRecord, key: string, dictionary: Dictionary, co
 
 	const source = target[key];
 	if (typeof source !== "string") return;
-	const translated = translateText(dictionary, source);
+	const translated = translateMetadataText(dictionary, key, source);
 	if (translated === source) return;
 	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
 		throw new Error(`Unsupported readonly settings metadata: ${key}`);
@@ -389,6 +592,7 @@ export function translateSettings(host: TranslationHost, dictionary: Dictionary)
 interface SlashCommandDisplayRule {
 	name: string;
 	description: string;
+	argumentHint?: string;
 	subcommands: Map<string, string>;
 }
 
@@ -425,6 +629,14 @@ const BUNDLED_DESCRIPTION_SUFFIX = " (bundled)";
 function readOwnString(value: ObjectRecord, key: string): string | undefined {
 	const descriptor = Object.getOwnPropertyDescriptor(value, key);
 	return descriptor && "value" in descriptor && typeof descriptor.value === "string" ? descriptor.value : undefined;
+}
+
+function readOptionalString(value: ObjectRecord, key: string): string | undefined | null {
+	const descriptor = Object.getOwnPropertyDescriptor(value, key);
+	if (!descriptor) return undefined;
+	if (!("value" in descriptor)) return null;
+	if (descriptor.value === undefined) return undefined;
+	return typeof descriptor.value === "string" ? descriptor.value : null;
 }
 
 function readDescription(value: ObjectRecord): string | undefined {
@@ -477,8 +689,11 @@ function createSlashDescriptionIndex(definitions: unknown): SlashDescriptionInde
 		const name = readOwnString(definition, "name");
 		const description = readDescription(definition);
 		if (!name || description === undefined) return undefined;
+		const argumentHint = readOptionalString(definition, "argumentHint");
+		if (argumentHint === null) return undefined;
 
 		const rule: SlashCommandDisplayRule = { name, description, subcommands: new Map() };
+		if (argumentHint !== undefined) rule.argumentHint = argumentHint;
 		const subcommands = readOptionalArray(definition, "subcommands");
 		if (subcommands === null) return undefined;
 		if (subcommands) {
@@ -546,25 +761,32 @@ function slashContextFromSuggestionArgs(args: unknown[]): SlashAutocompleteConte
 	return typeof line === "string" ? slashContextFromText(line.slice(0, cursorColumn)) : undefined;
 }
 
+type SlashDisplayMatch = SlashCommandDisplayRule | string;
+
 function findSlashDisplayMatch(
 	item: ObjectRecord,
 	context: SlashAutocompleteContext,
 	index: SlashDescriptionIndex,
 	blockedNames: ReadonlySet<string>,
-): string | undefined {
+): SlashDisplayMatch | undefined {
 	const value = readOwnString(item, "value");
 	if (value === undefined) return undefined;
 	if (context.kind === "command-name") {
 		const command = index.commands.get(value);
 		if (!command || blockedNames.has(value) || blockedNames.has(command.name)) return undefined;
-		return command.description;
+		return command;
 	}
 	const command = index.commands.get(context.commandName);
 	if (!command || blockedNames.has(context.commandName) || blockedNames.has(command.name)) return undefined;
 	return command.subcommands.get(value);
 }
 
-function translateStaticDisplayText(value: string, source: string, dictionary: Dictionary): string | undefined {
+function translateStaticDisplayText(
+	value: string,
+	source: string,
+	dictionary: Dictionary,
+	argumentHint?: string,
+): string | undefined {
 	const translated = translateText(dictionary, source);
 	if (translated === source) return undefined;
 	let text = value;
@@ -574,14 +796,17 @@ function translateStaticDisplayText(value: string, source: string, dictionary: D
 		text = text.slice(0, -BUNDLED_DESCRIPTION_SUFFIX.length);
 	}
 	if (text === source) return `${translated}${suffix}`;
-	const delimiter = text.lastIndexOf(" - ");
-	if (delimiter < 0 || text.slice(delimiter + 3) !== source) return undefined;
-	return `${text.slice(0, delimiter + 3)}${translated}${suffix}`;
+	if (!argumentHint) return undefined;
+	// Match the host formatter exactly; other prefixes remain part of the source description.
+	const prefix = `${argumentHint} - `;
+	if (!text.startsWith(prefix) || text.slice(prefix.length) !== source) return undefined;
+	return `${prefix}${translated}${suffix}`;
 }
 
 function translateSuggestionItem(
 	value: unknown,
 	source: string,
+	argumentHint: string | undefined,
 	dictionary: Dictionary,
 	originalItems: WeakMap<object, ObjectRecord>,
 ): unknown {
@@ -591,14 +816,14 @@ function translateSuggestionItem(
 	let translatedDescription: string | undefined;
 	let translatedNativeDetail: string | undefined;
 	if (descriptionDescriptor && "value" in descriptionDescriptor && typeof descriptionDescriptor.value === "string") {
-		translatedDescription = translateStaticDisplayText(descriptionDescriptor.value, source, dictionary);
+		translatedDescription = translateStaticDisplayText(descriptionDescriptor.value, source, dictionary, argumentHint);
 	}
 	if (
 		nativeDetailDescriptor &&
 		"value" in nativeDetailDescriptor &&
 		typeof nativeDetailDescriptor.value === "string"
 	) {
-		translatedNativeDetail = translateStaticDisplayText(nativeDetailDescriptor.value, source, dictionary);
+		translatedNativeDetail = translateStaticDisplayText(nativeDetailDescriptor.value, source, dictionary, argumentHint);
 	}
 	const descriptionChanged = translatedDescription !== undefined && translatedDescription !== descriptionDescriptor?.value;
 	const nativeDetailChanged = translatedNativeDetail !== undefined && translatedNativeDetail !== nativeDetailDescriptor?.value;
@@ -631,9 +856,17 @@ function translateSuggestionResult(
 		for (let itemIndex = 0; itemIndex < itemsDescriptor.value.length; itemIndex++) {
 			const item = itemsDescriptor.value[itemIndex];
 			if (!isRecord(item)) continue;
-			const source = findSlashDisplayMatch(item, context, index, blockedNames);
-			if (source === undefined) continue;
-			const translated = translateSuggestionItem(item, source, dictionary, originalItems);
+			const match = findSlashDisplayMatch(item, context, index, blockedNames);
+			if (match === undefined) continue;
+			let source: string;
+			let argumentHint: string | undefined;
+			if (typeof match === "string") {
+				source = match;
+			} else {
+				source = match.description;
+				argumentHint = match.argumentHint;
+			}
+			const translated = translateSuggestionItem(item, source, argumentHint, dictionary, originalItems);
 			if (translated === item) continue;
 			translatedItems ??= itemsDescriptor.value.slice();
 			translatedItems[itemIndex] = translated;
@@ -776,41 +1009,45 @@ function readBlockedSlashCommandNames(api: ObjectRecord): Set<string> {
 	return blockedNames;
 }
 
-function registerSlashAutocomplete(apiValue: unknown, definitions: unknown, dictionary: Dictionary): boolean {
+function registerSlashAutocomplete(
+	apiValue: unknown,
+	definitions: unknown,
+	dictionary: Dictionary,
+	report: DiagnosticReporter,
+): void {
 	try {
 		const index = createSlashDescriptionIndex(definitions);
-		if (!index || !isRecord(apiValue)) return false;
-		const on = Reflect.get(apiValue, "on", apiValue);
-		if (typeof on !== "function") return false;
+		if (!index || !isRecord(apiValue)) return;
+		const extensionApi = apiValue;
 		let registered = false;
 		const onSessionStart = function (_event: unknown, context: unknown): void {
 			try {
-				if (!isRecord(context)) return;
+				if (!isRecord(context) || context.hasUI !== true) return;
 				const ui = Reflect.get(context, "ui", context);
 				if (!isRecord(ui) || registered) return;
 				const addAutocompleteProvider = Reflect.get(ui, "addAutocompleteProvider", ui);
-				if (typeof addAutocompleteProvider !== "function") return;
+				if (typeof addAutocompleteProvider !== "function") {
+					report("[zhomp] slash autocomplete 显示层跳过: UI provider registration is unavailable", context);
+					return;
+				}
 				const factory = function (current: unknown): unknown {
 					try {
-						const blockedNames = readBlockedSlashCommandNames(apiValue);
+						const blockedNames = readBlockedSlashCommandNames(extensionApi);
 						return wrapSlashAutocompleteWithIndex(current, index, dictionary, blockedNames);
 					} catch (error) {
-						console.log(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
+						report(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
 						return current;
 					}
 				};
 				Reflect.apply(addAutocompleteProvider, ui, [factory]);
 				registered = true;
-				console.log("[zhomp] slash autocomplete 显示层注册请求已提交");
 			} catch (error) {
-				console.log(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
+				report(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`, context);
 			}
 		};
-		Reflect.apply(on, apiValue, ["session_start", onSessionStart]);
-		return true;
+		registerExtensionEvent(apiValue, "session_start", onSessionStart);
 	} catch (error) {
-		console.log(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
-		return false;
+		report(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
@@ -819,11 +1056,22 @@ export function isTranslationEnabled(environment: Environment = process.env): bo
 	return environment.OMP_ZH_ENABLED === "1" && environment.OMP_ZH_PROCESS_ID === String(process.pid);
 }
 
-/** Register before the host extension loader imports its component barrel. */
-export async function prepareModelTranslation(launchConfig: LaunchConfig, configPath: string): Promise<void> {
+/** Register display transforms before the host CLI imports their consumers. */
+export async function preparePreloadDisplayTranslations(launchConfig: LaunchConfig, configPath: string): Promise<void> {
 	if (!isTranslationEnabled()) return;
+	let reportDiagnostic: (message: string) => void = message => console.error(message);
 	try {
-		const dictionary = loadDictionary(process.env, launchConfig.dictPath);
+		const settingsUiPath = join(dirname(configPath), "settings-ui.ts");
+		const settingsUiModule: unknown = await import(pathToFileURL(settingsUiPath).href);
+		if (!isRecord(settingsUiModule) ||
+			typeof settingsUiModule.registerSettingsUiTranslation !== "function" ||
+			typeof settingsUiModule.setSettingsUiTranslationDiagnosticReporter !== "function" ||
+			typeof settingsUiModule.reportSettingsUiTranslationDiagnostic !== "function") {
+			throw new Error("Installed settings UI translation module is unavailable; reinstall zhomp");
+		}
+		const settingsUi = settingsUiModule as unknown as InstalledSettingsUiModule;
+		reportDiagnostic = message => settingsUi.reportSettingsUiTranslationDiagnostic(message);
+		const dictionary = loadDictionary(process.env, launchConfig.dictPath, reportDiagnostic);
 		if (Object.keys(dictionary).length === 0) return;
 		const modelUiPath = join(dirname(configPath), "model-ui.ts");
 		const modelUi: unknown = await import(pathToFileURL(modelUiPath).href);
@@ -831,32 +1079,42 @@ export async function prepareModelTranslation(launchConfig: LaunchConfig, config
 			throw new Error("Installed Model translation module is unavailable; reinstall zhomp");
 		}
 		modelUi.registerModelTranslation(launchConfig.host.modelHubPath, dictionary);
+		settingsUi.registerSettingsUiTranslation(launchConfig.host.settingsUiPath, dictionary);
 	} catch (error) {
-		console.log(`[zhomp] Model 汉化跳过: ${error instanceof Error ? error.message : String(error)}`);
+		reportDiagnostic(`[zhomp] 汉化预加载跳过: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
 export default async function (_pi: unknown): Promise<void> {
 	if (!isTranslationEnabled()) return;
+	const report = createUiDiagnosticReporter(_pi);
 	try {
 		const environment = process.env;
 		const configPath = environment.OMP_ZH_CONFIG;
 		if (!configPath || !isAbsolute(configPath)) {
 			throw new Error("OMP_ZH_CONFIG must be an absolute launch config path");
 		}
+		// This module path belongs to the runtime-selected installation, not this source tree.
+		const modelUiPath = join(dirname(configPath), "model-ui.ts");
+		const modelUi = await import(pathToFileURL(modelUiPath).href) as InstalledModelUiModule;
+		modelUi.setModelTranslationDiagnosticReporter(message => report(`[zhomp] ${message}`));
+		const settingsUiPath = join(dirname(configPath), "settings-ui.ts");
+		const settingsUi = await import(pathToFileURL(settingsUiPath).href) as InstalledSettingsUiModule;
+		settingsUi.setSettingsUiTranslationDiagnosticReporter(message => report(`[zhomp] ${message}`));
+		registerExtensionEvent(_pi, "session_shutdown", () => {
+			modelUi.setModelTranslationDiagnosticReporter(undefined);
+			settingsUi.setSettingsUiTranslationDiagnosticReporter(undefined);
+		});
 		// The installed host module is selected at runtime by the launcher's config path.
 		const hostModulePath = join(dirname(configPath), "host.ts");
 		const hostModule = await import(pathToFileURL(hostModulePath).href) as InstalledHostModule;
 		const launchConfig = hostModule.readLaunchConfig(configPath);
-		const dictionary = loadDictionary(environment, launchConfig.dictPath);
+		const dictionary = loadDictionary(environment, launchConfig.dictPath, report);
 		if (Object.keys(dictionary).length === 0) return;
 		const host = await loadHost(launchConfig.host);
-		const counts = translateSettings(host, dictionary);
-		const slashHookRegistered = registerSlashAutocomplete(_pi, host.builtinSlashCommandDefs, dictionary);
-		console.log(
-			`[zhomp] 汉化完成: tab ${counts.tabLabels}, label ${counts.labels}, description ${counts.descriptions}, warning ${counts.warnings}, group ${counts.groups}, option 文本 ${counts.optionLabels + counts.optionDescriptions}, slash autocomplete 显示层 ${slashHookRegistered ? "session_start hook 已注册" : "未注册"}（字典 ${Object.keys(dictionary).length} 条，宿主 ${host.version}）`,
-		);
+		translateSettings(host, dictionary);
+		registerSlashAutocomplete(_pi, host.builtinSlashCommandDefs, dictionary, report);
 	} catch (error) {
-		console.log(`[zhomp] 汉化失败: ${error instanceof Error ? error.message : String(error)}`);
+		report(`[zhomp] 汉化失败: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }

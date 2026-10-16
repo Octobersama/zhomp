@@ -114,11 +114,11 @@ test("every failed publish step restores first-install and upgrade state", () =>
 	const root = makeTempDir("zhomp-rollback");
 	try {
 		for (const upgrade of [false, true]) {
-			for (let failAt = 1; failAt <= (upgrade ? 6 : 3); failAt++) {
+			for (let failAt = 1; failAt <= (upgrade ? 8 : 4); failAt++) {
 				const working = join(root, `${upgrade}-${failAt}`);
 				mkdirSync(working);
 				writeText(join(working, "unrelated"), "user data");
-				const paths = [join(working, "ext", "zhomp.ts"), join(working, "data", "dict.json"), join(working, "bin", "zhomp")];
+				const paths = [join(working, "ext", "zhomp.ts"), join(working, "data", "dict.json"), join(working, "runtime", "settings-ui.ts"), join(working, "bin", "zhomp")];
 				if (upgrade) paths.forEach((path, index) => writeText(path, `old-${index}`));
 				const before = snapshotTree(working);
 				const failure = new Error("injected storage failure");
@@ -237,6 +237,9 @@ test("successful reinstall is idempotent and preserves caller files", () => {
 		const env = { OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: host, OMP_ZH_INSTALL_SHELL: "bash" };
 		writeText(join(home, ".omp", "zh", "user.txt"), "keep");
 		const first = install(repoDir, env);
+		const settingsUiPath = join(home, ".omp", "zh", "settings-ui.ts");
+		strictEqual(first.paths.includes(settingsUiPath), true);
+		strictEqual(readFileSync(settingsUiPath, "utf8"), readFileSync(join(repoDir, "runtime", "settings-ui.ts"), "utf8"));
 		const before = snapshotTree(home);
 		const second = install(repoDir, env);
 		deepStrictEqual(second.paths, first.paths);

@@ -23,6 +23,7 @@ for file in \
 	"$zh_dir/host.ts" \
 	"$zh_dir/launch.json" \
 	"$zh_dir/model-ui.ts" \
+	"$zh_dir/settings-ui.ts" \
 	"$zh_dir/zhomp.toml" \
 	"$home_dir/.bun/bin/zhomp" \
 	"$home_dir/.bun/bin/zhomp.cmd"; do

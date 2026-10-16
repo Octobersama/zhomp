@@ -28,6 +28,19 @@ const supportPolicy = readSupportPolicy(repoDir);
 const host = discoverPackage(supportPolicy.range);
 const dictionary = parseDictionaryText(readFileSync(join(repoDir, "dict", "zh-CN.json"), "utf8"));
 
+const settingsTemplateKeys = [
+	"Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until {escape}",
+	"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+	"Modal prompt editing. {escape} leaves Insert mode; Normal mode has hjkl, 0, $, ^, w, b, e, gg, G, counts, x/D/C, dd/yy, p and u; operators take motions or text objects (diw, ca(, dap); v/V start a Visual selection that y copies and d deletes",
+	"Keep drafts cleared with {ctrlC} in local {upDown} history until exit; disabling affects future clears",
+	"What pressing {escape} twice with an empty editor does: open the transcript rewind selector, open the session tree, or nothing",
+	"Show predicted word completions as inline hints: {tab} accepts with a space, {right} without",
+	"After a completed turn, ask the active model to predict your next message and show it as ghost text in the empty composer; {tab} or {right} inserts it without sending. Extra usage: every completed turn sends one more billed request over the whole conversation (counted in /stats)",
+	"When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
+	"Unset, it falls back to ${envName}.",
+	"${envName} overrides this setting while it is set.",
+] as const;
+
 function addField(fields: DisplayField[], value: unknown, path: string): void {
 	if (typeof value === "string" && value.length > 0) fields.push({ text: value, path });
 }
@@ -228,7 +241,8 @@ async function readInstalledDisplayFields(): Promise<DisplayField[]> {
 describe("real installed settings dictionary coverage", () => {
 	test("covers semantic fields emitted by the installed settings UI", async () => {
 		const fields = await readInstalledDisplayFields();
-		const missing = findUncoveredFields(fields, dictionary);
+		const templateFields = settingsTemplateKeys.map((text, index) => ({ text, path: `settings template ${index}` }));
+		const missing = findUncoveredFields([...fields, ...templateFields], dictionary);
 		strictEqual(missing.length, 0, `uncovered semantic settings text:\n${missing.map(field => `${field.path}: ${field.text}`).join("\n")}`);
 	});
 

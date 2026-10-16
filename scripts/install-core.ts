@@ -171,6 +171,7 @@ export function install(repoDir: string, env: Env = process.env, replace: typeof
 		{ path: join(zhDir, "launch.ts"), content: readFileSync(join(repoDir, "runtime", "launch.ts")) },
 		{ path: join(zhDir, "host.ts"), content: readFileSync(join(repoDir, "runtime", "host.ts")) },
 		{ path: join(zhDir, "model-ui.ts"), content: readFileSync(join(repoDir, "runtime", "model-ui.ts")) },
+		{ path: join(zhDir, "settings-ui.ts"), content: readFileSync(join(repoDir, "runtime", "settings-ui.ts")) },
 		{ path: join(zhDir, "zhomp.toml"), content: readFileSync(join(repoDir, "runtime", "zhomp.toml")) },
 		{ path: join(zhDir, "launch.json"), content: JSON.stringify({ packageDir: host.packageDir, supportedRange: range, extensionPath, dictPath }, null, 2) + "\n" },
 	];

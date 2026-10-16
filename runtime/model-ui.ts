@@ -122,6 +122,46 @@ const MODEL_HUB_TEXT_KEYS = [
 	"Clear chain",
 	"Log in",
 	"Assign role",
+	"compaction limit",
+	"Compaction limit",
+	"accept compaction point",
+	"set compaction point",
+	"Accept compaction point",
+	"Set compaction point",
+	"limit:",
+	" limit ",
+	"400k base · f400k fixed · 80% · empty resets",
+	"Kind:",
+	"Search models…",
+	"kind",
+	"Kind roles",
+	"Chat roles",
+	"Fallback chain",
+	"Source",
+	"Close",
+	"Not signed in",
+	"Log in with OAuth",
+	"not configured",
+	"refreshing model list…",
+	"{count} models",
+	"Provider requires authentication before models can be discovered.",
+	"Provider has not been refreshed yet.",
+	"Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.",
+	"Using cached model list from {age}. Live refresh is still pending.",
+	"Using cached model list. Live refresh is still pending.",
+	"Provider unavailable. Using cached model list from {age}.",
+	"Provider unavailable.",
+	"{provider} has no credentials configured",
+	"Set {envVars} in your environment, or add a key in config.",
+	"Add an API key for this provider in config.",
+	"Sign in with /login",
+	"Set {envVars} to sign in",
+	"Add an API key in config to sign in",
+	"{count} models in catalog:",
+	"{count} models in catalog",
+	"{count} more",
+	"cycle {count}",
+	"Stop {count} of the quick-switch cycle",
 ] as const;
 
 const LEGACY_MARKERS = [
@@ -147,7 +187,13 @@ const DESCRIBED_PRESET_MARKERS = [
 	`const switchPreset = this.#presets().names.length > 0 ? \` · \${formatKeyHints(["p", "shift+p"])} preset\` : "";`,
 ];
 
-type ModelHubShape = "legacy" | "described" | "described-presets";
+const DESCRIBED_COMPACTION_MARKERS = [
+	"const COMPACTION_INPUT_HINT = \"400k base · f400k fixed · 80% · empty resets\";",
+	"#openCompactionStrip(): void {",
+	"keys(\"compaction limit\", \"k\")",
+];
+
+type ModelHubShape = "legacy" | "described" | "described-presets" | "described-compaction-presets";
 
 interface ExactPatch {
 	before: string;
@@ -195,8 +241,13 @@ function isSupportedShape(source: string): ModelHubShape | undefined {
 	if (described) {
 		if (!DESCRIBED_MARKERS.every(marker => countOccurrences(source, marker) === 1)) return undefined;
 		const presetMarkerCounts = DESCRIBED_PRESET_MARKERS.map(marker => countOccurrences(source, marker));
-		if (presetMarkerCounts.every(count => count === 0)) return "described";
-		return presetMarkerCounts.every(count => count === 1) ? "described-presets" : undefined;
+		const hasPresets = presetMarkerCounts.every(count => count === 1);
+		if (!hasPresets && !presetMarkerCounts.every(count => count === 0)) return undefined;
+		const compactionMarkerCounts = DESCRIBED_COMPACTION_MARKERS.map(marker => countOccurrences(source, marker));
+		const hasCompaction = compactionMarkerCounts.every(count => count === 1);
+		if (!hasCompaction && !compactionMarkerCounts.every(count => count === 0)) return undefined;
+		if (hasCompaction) return hasPresets ? "described-compaction-presets" : undefined;
+		return hasPresets ? "described-presets" : "described";
 	}
 	if (source.includes("#footerHints()") || source.includes("describeHubFrame(") || source.includes("DescribeContext")) {
 		return undefined;
@@ -292,8 +343,112 @@ function commonPatches(shape: ModelHubShape): ExactPatch[] {
 			after: `this.#browser = new ModelBrowser(settings, {\n\t\t\temptyText: () => this.#emptyStateMessage() ??\n\t\t\t(this.#browser.query.trim() ? __zhompModelHubText("No matching models") : __zhompModelHubText("No models available in this scope")),\n\t\t});`,
 			count: 1,
 		},
+		{
+			before: `theme.fg("dim", "Kind:")`,
+			after: `theme.fg("dim", __zhompModelHubText("Kind:"))`,
+			count: 1,
+		},
+		{
+			before: `MODEL_KIND_TABS.map(kind => ({ label: kind }))`,
+			after: `MODEL_KIND_TABS.map(kind => ({ label: kind === "all" ? __zhompModelHubText("All") : kind }))`,
+			count: 1,
+		},
+		{
+			before: `ROLE_TABS.map(tab => ({ label: tab === "kind" ? "kinds" : tab }))`,
+			after: `ROLE_TABS.map(tab => ({ label: tab === "all" ? __zhompModelHubText("All") : tab === "chat" ? __zhompModelHubText("Chat") : __zhompModelHubText("Kinds") }))`,
+			count: 1,
+		},
+		{
+			before: 'if (hiddenAbove > 0) parts.push(`↑ ${hiddenAbove} more`);',
+			after: 'if (hiddenAbove > 0) parts.push(`↑ ${__zhompModelHubText("{count} more", { count: String(hiddenAbove) })}`);',
+			count: 1,
+		},
+		{
+			before: 'if (hiddenBelow > 0) parts.push(`↓ ${hiddenBelow} more`);',
+			after: 'if (hiddenBelow > 0) parts.push(`↓ ${__zhompModelHubText("{count} more", { count: String(hiddenBelow) })}`);',
+			count: 1,
+		},
 	];
 }
+
+const PROVIDER_DISCOVERY_PATCHES: readonly ExactPatch[] = [
+	{
+		before: '? `  Using cached model list from ${age}. Live refresh is still pending.`',
+		after: '? `  ${__zhompModelHubText("Using cached model list from {age}. Live refresh is still pending.", { age })}`',
+		count: 1,
+	},
+	{
+		before: ': "  Using cached model list. Live refresh is still pending.";',
+		after: ': `  ${__zhompModelHubText("Using cached model list. Live refresh is still pending.")}`;',
+		count: 1,
+	},
+	{
+		before: 'return age ? `  Provider unavailable. Using cached model list from ${age}.` : "  Provider unavailable.";',
+		after: 'return age ? `  ${__zhompModelHubText("Provider unavailable. Using cached model list from {age}.", { age })}` : `  ${__zhompModelHubText("Provider unavailable.")}`;',
+		count: 1,
+	},
+	{
+		before: 'return "  Provider requires authentication before models can be discovered.";',
+		after: 'return `  ${__zhompModelHubText("Provider requires authentication before models can be discovered.")}`;',
+		count: 1,
+	},
+	{
+		before: 'return "  Provider has not been refreshed yet.";',
+		after: 'return `  ${__zhompModelHubText("Provider has not been refreshed yet.")}`;',
+		count: 1,
+	},
+	{
+		before: 'return "  Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.";',
+		after: 'return `  ${__zhompModelHubText("Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.")}`;',
+		count: 1,
+	},
+];
+
+const PROVIDER_ANSI_STATUS_PATCHES: readonly ExactPatch[] = [
+	{
+		before: 'text = `${entry.label} · not configured`;',
+		after: 'text = `${entry.label} · ${__zhompModelHubText("not configured")}`;',
+		count: 1,
+	},
+	{
+		before: 'text = `${entry.label} · refreshing model list…`;',
+		after: 'text = `${entry.label} · ${__zhompModelHubText("refreshing model list…")}`;',
+		count: 1,
+	},
+	{
+		before: 'text = `${entry.label} · ${entry.annotation ?? "0"} models${scopedSuffix}`;',
+		after: 'text = `${entry.label} · ${__zhompModelHubText("{count} models", { count: entry.annotation ?? "0" })}${scopedSuffix}`;',
+		count: 1,
+	},
+];
+
+const PROVIDER_ANSI_LOCKED_PATCHES: readonly ExactPatch[] = [
+	{
+		before: 'lines.push(truncateToWidth(theme.fg("warning", `  ${entry.label} has no credentials configured`), width));',
+		after: 'lines.push(truncateToWidth(theme.fg("warning", `  ${__zhompModelHubText("{provider} has no credentials configured", { provider: entry.label })}`), width));',
+		count: 1,
+	},
+	{
+		before: 'theme.fg("muted", `  Set ${envVars.join(" or ")} in your environment, or add a key in config.`)',
+		after: 'theme.fg("muted", `  ${__zhompModelHubText("Set {envVars} in your environment, or add a key in config.", { envVars: envVars.join(" or ") })}`)',
+		count: 1,
+	},
+	{
+		before: 'theme.fg("muted", "  Add an API key for this provider in config.")',
+		after: 'theme.fg("muted", `  ${__zhompModelHubText("Add an API key for this provider in config.")}`)',
+		count: 1,
+	},
+	{
+		before: 'theme.fg("accent", `  ${theme.nav.cursor} Log in with OAuth (${formatKeyHint("enter")})`)',
+		after: 'theme.fg("accent", `  ${theme.nav.cursor} ${__zhompModelHubText("Log in with OAuth")} (${formatKeyHint("enter")})`)',
+		count: 1,
+	},
+	{
+		before: 'theme.fg("dim", `  ${catalogCount} models in catalog:`)',
+		after: 'theme.fg("dim", `  ${__zhompModelHubText("{count} models in catalog:", { count: String(catalogCount) })}`)',
+		count: 1,
+	},
+];
 
 const LEGACY_STATUS_PATCHES: readonly ExactPatch[] = [
 	{
@@ -374,22 +529,22 @@ const LEGACY_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 	{
 		before: `return \"Enter/→ models · ↑/↓ providers · type to search · Alt+←/→ kind · Esc cancel\";`,
-		after: `return \`Enter/→ \${__zhompModelHubText(\"models\")} · ↑/↓ \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · Alt+←/→ kind · Esc \${__zhompModelHubText(\"cancel\")}\`;`,
+		after: `return "Enter/→ " + __zhompModelHubText("models") + " · ↑/↓ " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + " · Esc " + __zhompModelHubText("cancel");`,
 		count: 1,
 	},
 	{
 		before: `return \"Enter pick fallback · ↑/↓ models · ← providers · type to search · Alt+←/→ kind · Esc cancel\";`,
-		after: `return \`Enter \${__zhompModelHubText(\"pick fallback\")} · ↑/↓ \${__zhompModelHubText(\"models\")} · ← \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · Alt+←/→ kind · Esc \${__zhompModelHubText(\"cancel\")}\`;`,
+		after: `return "Enter " + __zhompModelHubText("pick fallback") + " · ↑/↓ " + __zhompModelHubText("models") + " · ← " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + " · Esc " + __zhompModelHubText("cancel");`,
 		count: 1,
 	},
 	{
 		before: `return \"Enter pick the protected model · ↑/↓ models · ← providers · type to search · Alt+←/→ kind · Esc cancel\";`,
-		after: `return \`Enter \${__zhompModelHubText(\"pick the protected model\")} · ↑/↓ \${__zhompModelHubText(\"models\")} · ← \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · Alt+←/→ kind · Esc \${__zhompModelHubText(\"cancel\")}\`;`,
+		after: `return "Enter " + __zhompModelHubText("pick the protected model") + " · ↑/↓ " + __zhompModelHubText("models") + " · ← " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + " · Esc " + __zhompModelHubText("cancel");`,
 		count: 1,
 	},
 	{
 		before: `return \"Enter assign · ↑/↓ models · ← providers · type to search · Alt+←/→ kind · Esc cancel\";`,
-		after: `return \`Enter \${__zhompModelHubText(\"assign\")} · ↑/↓ \${__zhompModelHubText(\"models\")} · ← \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · Alt+←/→ kind · Esc \${__zhompModelHubText(\"cancel\")}\`;`,
+		after: `return "Enter " + __zhompModelHubText("assign") + " · ↑/↓ " + __zhompModelHubText("models") + " · ← " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + " · Esc " + __zhompModelHubText("cancel");`,
 		count: 1,
 	},
 	{
@@ -434,12 +589,12 @@ const LEGACY_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 	{
 		before: `return \`Enter/→ models · ↑/↓ providers · type to search · Alt+←/→ kind\${refresh} · Esc close\`;`,
-		after: `return \`Enter/→ \${__zhompModelHubText(\"models\")} · ↑/↓ \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · Alt+←/→ kind\${refresh} · Esc \${__zhompModelHubText(\"close\")}\`;`,
+		after: `return "Enter/→ " + __zhompModelHubText("models") + " · ↑/↓ " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + refresh + " · Esc " + __zhompModelHubText("close");`,
 		count: 1,
 	},
 	{
 		before: `return \`Enter assign roles · ↑/↓ models · ← providers · type to search · Alt+←/→ kind\${refresh} · Esc close\`;`,
-		after: `return \`Enter \${__zhompModelHubText(\"assign\")} \${__zhompModelHubText(\"roles\")} · ↑/↓ \${__zhompModelHubText(\"models\")} · ← \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · Alt+←/→ kind\${refresh} · Esc \${__zhompModelHubText(\"close\")}\`;`,
+		after: `return "Enter " + __zhompModelHubText("assign") + " " + __zhompModelHubText("roles") + " · ↑/↓ " + __zhompModelHubText("models") + " · ← " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + refresh + " · Esc " + __zhompModelHubText("close");`,
 		count: 1,
 	},
 	{
@@ -482,12 +637,12 @@ const DESCRIBED_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 	{
 		before: `return \`\${enterRight} models · \${upDown} providers · type to search · \${altLeftRight} kind · \${cancel} cancel\`;`,
-		after: `return \`\${enterRight} \${__zhompModelHubText(\"models\")} · \${upDown} \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · \${altLeftRight} kind · \${cancel} \${__zhompModelHubText(\"cancel\")}\`;`,
+		after: `return enterRight + " " + __zhompModelHubText("models") + " · " + upDown + " " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · " + altLeftRight + " " + __zhompModelHubText("kind") + " · " + cancel + " " + __zhompModelHubText("cancel");`,
 		count: 1,
 	},
 	{
 		before: `const browse = \`\${upDown} models · \${left} providers · type to search · \${altLeftRight} kind · \${cancel} cancel\`;`,
-		after: `const browse = \`\${upDown} \${__zhompModelHubText(\"models\")} · \${left} \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · \${altLeftRight} kind · \${cancel} \${__zhompModelHubText(\"cancel\")}\`;`,
+		after: `const browse = upDown + " " + __zhompModelHubText("models") + " · " + left + " " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · " + altLeftRight + " " + __zhompModelHubText("kind") + " · " + cancel + " " + __zhompModelHubText("cancel");`,
 		count: 1,
 	},
 	{
@@ -511,11 +666,6 @@ const DESCRIBED_FOOTER_PATCHES: readonly ExactPatch[] = [
 		count: 2,
 	},
 	{
-		before: `return \`\${upDown} rows · \${enter} replace · \${formatKeyHint(\"f\")} add another · \${formatKeyHint(\"x\")} remove\${thinking} · [/] reorder · \${left} providers\`;`,
-		after: `return \`\${upDown} \${__zhompModelHubText(\"rows\")} · \${enter} \${__zhompModelHubText(\"replace\")} · \${formatKeyHint(\"f\")} \${__zhompModelHubText(\"add another\")} · \${formatKeyHint(\"x\")} \${__zhompModelHubText(\"remove\")}\${thinking} · [/] \${__zhompModelHubText(\"reorder\")} · \${left} \${__zhompModelHubText(\"providers\")}\`;`,
-		count: 1,
-	},
-	{
 		before: `return \`\${upDown} rows · \${formatKeyHints([\"enter\", \"f\"])} add fallback · \${formatKeyHint(\"x\")} clear chain · \${left} providers\`;`,
 		after: `return \`\${upDown} \${__zhompModelHubText(\"rows\")} · \${formatKeyHints([\"enter\", \"f\"])} \${__zhompModelHubText(\"add fallback\")} · \${formatKeyHint(\"x\")} \${__zhompModelHubText(\"clear chain\")} · \${left} \${__zhompModelHubText(\"providers\")}\`;`,
 		count: 1,
@@ -537,12 +687,38 @@ const DESCRIBED_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 	{
 		before: `return \`\${enterRight} models · \${upDown} providers · type to search · \${altLeftRight} kind\${refresh} · \${cancel} close\`;`,
-		after: `return \`\${enterRight} \${__zhompModelHubText(\"models\")} · \${upDown} \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · \${altLeftRight} kind\${refresh} · \${cancel} \${__zhompModelHubText(\"close\")}\`;`,
+		after: `return enterRight + " " + __zhompModelHubText("models") + " · " + upDown + " " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · " + altLeftRight + " " + __zhompModelHubText("kind") + refresh + " · " + cancel + " " + __zhompModelHubText("close");`,
 		count: 1,
 	},
 	{
 		before: `return \`\${enter} assign roles · \${upDown} models · \${left} providers · type to search · \${altLeftRight} kind\${refresh} · \${cancel} close\`;`,
-		after: `return \`\${enter} \${__zhompModelHubText(\"assign\")} \${__zhompModelHubText(\"roles\")} · \${upDown} \${__zhompModelHubText(\"models\")} · \${left} \${__zhompModelHubText(\"providers\")} · \${__zhompModelHubText(\"type to search\")} · \${altLeftRight} kind\${refresh} · \${cancel} \${__zhompModelHubText(\"close\")}\`;`,
+		after: `return enter + " " + __zhompModelHubText("assign") + " " + __zhompModelHubText("roles") + " · " + upDown + " " + __zhompModelHubText("models") + " · " + left + " " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · " + altLeftRight + " " + __zhompModelHubText("kind") + refresh + " · " + cancel + " " + __zhompModelHubText("close");`,
+		count: 1,
+	},
+];
+
+const DESCRIBED_PRE_COMPACTION_FOOTER_PATCHES: readonly ExactPatch[] = [
+	{
+		before: `return \`\${upDown} rows · \${enter} replace · \${formatKeyHint("f")} add another · \${formatKeyHint("x")} remove\${thinking} · [/] reorder · \${left} providers\`;`,
+		after: `return \`\${upDown} \${__zhompModelHubText("rows")} · \${enter} \${__zhompModelHubText("replace")} · \${formatKeyHint("f")} \${__zhompModelHubText("add another")} · \${formatKeyHint("x")} \${__zhompModelHubText("remove")}\${thinking} · [/] \${__zhompModelHubText("reorder")} · \${left} \${__zhompModelHubText("providers")}\`;`,
+		count: 1,
+	},
+];
+
+const DESCRIBED_COMPACTION_FOOTER_PATCHES: readonly ExactPatch[] = [
+	{
+		before: `return \`\${enter} \${compactionConfirmPending(strip) ? "accept" : "set"} compaction point · \${cancel} cancel\`;`,
+		after: `return \`\${enter} \${__zhompModelHubText(compactionConfirmPending(strip) ? "accept compaction point" : "set compaction point")} · \${cancel} \${__zhompModelHubText("cancel")}\`;`,
+		count: 1,
+	},
+	{
+		before: `\${formatKeyHint("k")} compaction limit\``,
+		after: `\${formatKeyHint("k")} \${__zhompModelHubText("compaction limit")}\``,
+		count: 1,
+	},
+	{
+		before: `return \`\${upDown} rows · \${enter} replace · \${formatKeyHint("f")} add another · \${formatKeyHint("x")} remove\${thinking}\${compaction} · [/] reorder · \${left} providers\`;`,
+		after: `return \`\${upDown} \${__zhompModelHubText("rows")} · \${enter} \${__zhompModelHubText("replace")} · \${formatKeyHint("f")} \${__zhompModelHubText("add another")} · \${formatKeyHint("x")} \${__zhompModelHubText("remove")}\${thinking}\${compaction} · [/] \${__zhompModelHubText("reorder")} · \${left} \${__zhompModelHubText("providers")}\`;`,
 		count: 1,
 	},
 ];
@@ -560,15 +736,28 @@ const DESCRIBED_BASE_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 ];
 
-const DESCRIBED_PRESET_FOOTER_PATCHES: readonly ExactPatch[] = [
+const DESCRIBED_PRESET_COMMON_FOOTER_PATCHES: readonly ExactPatch[] = [
 	{
 		before: `const presets =\n\t\t\t\t\tthis.#presets().names.length > 0 ? \` · \${formatKeyHints(["ctrl+left", "ctrl+right"])} preset\` : "";\n\t\t\t\treturn \`\${upDown} providers · \${enterRight} roles · \${altLeftRight} tabs\${presets} · \${cancel} close\`;`,
 		after: `const presets =\n\t\t\t\t\tthis.#presets().names.length > 0 ? \` · \${formatKeyHints(["ctrl+left", "ctrl+right"])} \${__zhompModelHubText("preset")}\` : "";\n\t\t\t\treturn \`\${upDown} \${__zhompModelHubText("providers")} · \${enterRight} \${__zhompModelHubText("roles")} · \${altLeftRight} \${__zhompModelHubText("tabs")}\${presets} · \${cancel} \${__zhompModelHubText("close")}\`;`,
 		count: 1,
 	},
+];
+
+const DESCRIBED_PRESET_FOOTER_PATCHES: readonly ExactPatch[] = [
+	...DESCRIBED_PRESET_COMMON_FOOTER_PATCHES,
 	{
 		before: `const switchPreset = this.#presets().names.length > 0 ? \` · \${formatKeyHints(["p", "shift+p"])} preset\` : "";\n\t\t\treturn \`\${upDown} rows · \${enter} pick · \${formatKeyHint("f")} fallback · \${formatKeyHint("x")} clear\${thinking} · \${formatKeyHint("c")} cycle · [/] reorder · \${formatKeyHint("n")} new\${savePreset}\${switchPreset}\`;`,
 		after: `const switchPreset = this.#presets().names.length > 0 ? \` · \${formatKeyHints(["p", "shift+p"])} \${__zhompModelHubText("preset")}\` : "";\n\t\t\treturn \`\${upDown} \${__zhompModelHubText("rows")} · \${enter} \${__zhompModelHubText("pick")} · \${formatKeyHint("f")} \${__zhompModelHubText("fallback")} · \${formatKeyHint("x")} \${__zhompModelHubText("clear")}\${thinking} · \${formatKeyHint("c")} \${__zhompModelHubText("cycle")} · [/] \${__zhompModelHubText("reorder")} · \${formatKeyHint("n")} \${__zhompModelHubText("new")}\${savePreset}\${switchPreset}\`;`,
+		count: 1,
+	},
+];
+
+const DESCRIBED_COMPACTION_PRESET_FOOTER_PATCHES: readonly ExactPatch[] = [
+	...DESCRIBED_PRESET_COMMON_FOOTER_PATCHES,
+	{
+		before: `const switchPreset = this.#presets().names.length > 0 ? \` · \${formatKeyHints(["p", "shift+p"])} preset\` : "";\n\t\t\treturn \`\${upDown} rows · \${enter} pick · \${formatKeyHint("f")} fallback · \${formatKeyHint("x")} clear\${thinking}\${compaction} · \${formatKeyHint("c")} cycle · [/] reorder · \${formatKeyHint("n")} new\${savePreset}\${switchPreset}\`;`,
+		after: `const switchPreset = this.#presets().names.length > 0 ? \` · \${formatKeyHints(["p", "shift+p"])} \${__zhompModelHubText("preset")}\` : "";\n\t\t\treturn \`\${upDown} \${__zhompModelHubText("rows")} · \${enter} \${__zhompModelHubText("pick")} · \${formatKeyHint("f")} \${__zhompModelHubText("fallback")} · \${formatKeyHint("x")} \${__zhompModelHubText("clear")}\${thinking}\${compaction} · \${formatKeyHint("c")} \${__zhompModelHubText("cycle")} · [/] \${__zhompModelHubText("reorder")} · \${formatKeyHint("n")} \${__zhompModelHubText("new")}\${savePreset}\${switchPreset}\`;`,
 		count: 1,
 	},
 ];
@@ -690,18 +879,8 @@ const DESCRIBED_ONLY_PATCHES: readonly ExactPatch[] = [
 		count: 1,
 	},
 	{
-		before: `const labelText = preset ? "Preset name:" : "New role name:";`,
-		after: `const labelText = preset ? __zhompModelHubText("Preset name:") : __zhompModelHubText("New role name:");`,
-		count: 1,
-	},
-	{
 		before: `theme.fg("dim", "(letters, digits, - and _)")`,
 		after: `theme.fg("dim", __zhompModelHubText("(letters, digits, - and _)"))`,
-		count: 1,
-	},
-	{
-		before: `pickerAction(\`roles:\${action}\`, label, key, primary ? { primary: true } : undefined);`,
-		after: `pickerAction(\`roles:\${action}\`, __zhompModelHubText(label), key, primary ? { primary: true } : undefined);`,
 		count: 1,
 	},
 	{
@@ -727,11 +906,6 @@ const DESCRIBED_ONLY_PATCHES: readonly ExactPatch[] = [
 	{
 		before: `pickerAction("assign", label, "enter", { primary: true })`,
 		after: `pickerAction("assign", __zhompModelHubText(label), "enter", { primary: true })`,
-		count: 1,
-	},
-	{
-		before: `pickerAction("login", "Log in", "enter", { primary: true })`,
-		after: `pickerAction("login", __zhompModelHubText("Log in"), "enter", { primary: true })`,
 		count: 1,
 	},
 	{
@@ -789,6 +963,227 @@ const DESCRIBED_ONLY_PATCHES: readonly ExactPatch[] = [
 			after: `text([span(__zhompModelHubText(\"Roles:\"), \"dim\")]),`,
 			count: 1,
 		},
+	{
+		before: 'text([span("Kind:", "dim")]),',
+		after: 'text([span(__zhompModelHubText("Kind:"), "dim")]),',
+		count: 1,
+	},
+	{
+		before: '{ items: MODEL_KIND_TABS.map(kind => ({ id: kind, label: kind })), active: this.#modelKindTab },',
+		after: '{ items: MODEL_KIND_TABS.map(kind => ({ id: kind, label: kind === "all" ? __zhompModelHubText("All") : kind })), active: this.#modelKindTab },',
+		count: 1,
+	},
+	{
+		before: 'items: ROLE_TABS.map(tab => ({ id: tab, label: tab === "kind" ? "kinds" : tab }))',
+		after: 'items: ROLE_TABS.map(tab => ({ id: tab, label: tab === "all" ? __zhompModelHubText("All") : tab === "chat" ? __zhompModelHubText("Chat") : __zhompModelHubText("Kinds") }))',
+		count: 1,
+	},
+	{
+		before: 'label: tab === "all" ? "All" : tab === "chat" ? "Chat" : "Kinds",',
+		after: 'label: tab === "all" ? __zhompModelHubText("All") : tab === "chat" ? __zhompModelHubText("Chat") : __zhompModelHubText("Kinds"),',
+		count: 1,
+	},
+	{
+		before: '{ id: "thinking", head: "Thinking", format: "dim", priority: 1 },',
+		after: '{ id: "thinking", head: __zhompModelHubText("Thinking"), format: "dim", priority: 1 },',
+		count: 1,
+	},
+	{
+		before: 'node("section", { head: "Fallback chain" }, [',
+		after: 'node("section", { head: __zhompModelHubText("Fallback chain") }, [',
+		count: 1,
+	},
+	{
+		before: 'k: [span("Thinking", "muted")],',
+		after: 'k: [span(__zhompModelHubText("Thinking"), "muted")],',
+		count: 1,
+	},
+	{
+		before: '{ k: [span("Source", "muted")],',
+		after: '{ k: [span(__zhompModelHubText("Source"), "muted")],',
+		count: 1,
+	},
+	{
+		before: 'open(this.#roleTab === "kind" ? "kind" : "chat", this.#roleTab === "kind" ? "Kind roles" : "Chat roles");',
+		after: 'open(this.#roleTab === "kind" ? "kind" : "chat", this.#roleTab === "kind" ? __zhompModelHubText("Kind roles") : __zhompModelHubText("Chat roles"));',
+		count: 1,
+	},
+	{
+		before: 'open("kind", "Kind roles");',
+		after: 'open("kind", __zhompModelHubText("Kind roles"));',
+		count: 1,
+	},
+	{
+		before: 'label: MODEL_KIND_LABELS[kind],',
+		after: 'label: kind === "all" ? __zhompModelHubText("All") : MODEL_KIND_LABELS[kind],',
+		count: 1,
+	},
+	{
+		before: 'placeholder: "Search models…",',
+		after: 'placeholder: __zhompModelHubText("Search models…"),',
+		count: 1,
+	},
+	{
+		before: 'spans = [span(`${entry.label} · not configured`, "muted")];',
+		after: 'spans = [span(`${entry.label} · ${__zhompModelHubText("not configured")}`, "muted")];',
+		count: 1,
+	},
+	{
+		before: '{ label: [span(`${entry.label} · refreshing model list…`, "muted")] },',
+		after: '{ label: [span(`${entry.label} · ${__zhompModelHubText("refreshing model list…")}`, "muted")] },',
+		count: 1,
+	},
+	{
+		before: 'spans = [span(`${entry.label} · ${entry.annotation ?? "0"} models${scopedSuffix}`, "muted")];',
+		after: 'spans = [span(`${entry.label} · ${__zhompModelHubText("{count} models", { count: entry.annotation ?? "0" })}${scopedSuffix}`, "muted")];',
+		count: 1,
+	},
+	{
+		before: 'return `${entry.label} · refreshing model list…`;',
+		after: 'return `${entry.label} · ${__zhompModelHubText("refreshing model list…")}`;',
+		count: 1,
+	},
+	{
+		before: 'text([span(`${entry.label} has no credentials configured`, "warning")], { wrap: "word" }),',
+		after: 'text([span(__zhompModelHubText("{provider} has no credentials configured", { provider: entry.label }), "warning")], { wrap: "word" }),',
+		count: 1,
+	},
+	{
+		before: '`Set ${envVars.join(" or ")} in your environment, or add a key in config.`',
+		after: '__zhompModelHubText("Set {envVars} in your environment, or add a key in config.", { envVars: envVars.join(" or ") })',
+		count: 2,
+	},
+	{
+		before: '"Add an API key for this provider in config."',
+		after: '__zhompModelHubText("Add an API key for this provider in config.")',
+		count: 2,
+	},
+	{
+		before: 'span("Log in with OAuth", "accent")',
+		after: 'span(__zhompModelHubText("Log in with OAuth"), "accent")',
+		count: 1,
+	},
+	{
+		before: '{ head: [span(`${catalogCount} models in catalog`, "dim")] }',
+		after: '{ head: [span(__zhompModelHubText("{count} models in catalog", { count: String(catalogCount) }), "dim")] }',
+		count: 1,
+	},
+	{
+		before: 'group: "Not signed in",',
+		after: 'group: __zhompModelHubText("Not signed in"),',
+		count: 1,
+	},
+	{
+		before: '? "Sign in with /login"',
+		after: '? __zhompModelHubText("Sign in with /login")',
+		count: 1,
+	},
+	{
+		before: '`Set ${envVars.join(" or ")} to sign in`',
+		after: '__zhompModelHubText("Set {envVars} to sign in", { envVars: envVars.join(" or ") })',
+		count: 1,
+	},
+	{
+		before: '"Add an API key in config to sign in"',
+		after: '__zhompModelHubText("Add an API key in config to sign in")',
+		count: 1,
+	},
+	{
+		before: 'return `${entry.label} has no credentials configured. ${how}`;',
+		after: 'return `${__zhompModelHubText("{provider} has no credentials configured", { provider: entry.label })}. ${how}`;',
+		count: 1,
+	},
+	{
+		before: '{ head: `${catalogCount} models in catalog` }',
+		after: '{ head: __zhompModelHubText("{count} models in catalog", { count: String(catalogCount) }) }',
+		count: 1,
+	},
+	{
+		before: 'text: `cycle ${cycleIndex + 1}`',
+		after: 'text: __zhompModelHubText("cycle {count}", { count: String(cycleIndex + 1) })',
+		count: 1,
+	},
+	{
+		before: 'title: `Stop ${cycleIndex + 1} of the quick-switch cycle`',
+		after: 'title: __zhompModelHubText("Stop {count} of the quick-switch cycle", { count: String(cycleIndex + 1) })',
+		count: 1,
+	},
+	{
+		before: 'if (this.#assignmentPending) return [CLOSE_ACTION];',
+		after: `const close = (): TspPickerAction => ({ ...CLOSE_ACTION, label: __zhompModelHubText("Close") });\n\t\tif (this.#assignmentPending) return [close()];`,
+		count: 1,
+	},
+	{
+		before: 'return compact([...actions, CLOSE_ACTION]);',
+		after: 'return compact([...actions, close()]);',
+		count: 1,
+	},
+	{
+		before: 'pickerAction("login", "Log in", "enter", { primary: true }), CLOSE_ACTION]',
+		after: 'pickerAction("login", __zhompModelHubText("Log in"), "enter", { primary: true }), close()]',
+		count: 1,
+	},
+	{
+		before: ': [CLOSE_ACTION];',
+		after: ': [close()];',
+		count: 1,
+	},
+	{
+		before: 'this.#browser.query.length > 0 ? cancel("Clear search") : CLOSE_ACTION,',
+		after: 'this.#browser.query.length > 0 ? cancel("Clear search") : close(),',
+		count: 1,
+	},
+];
+
+const DESCRIBED_PRE_COMPACTION_ONLY_PATCHES: readonly ExactPatch[] = [
+	{
+		before: `const labelText = preset ? "Preset name:" : "New role name:";`,
+		after: `const labelText = preset ? __zhompModelHubText("Preset name:") : __zhompModelHubText("New role name:");`,
+		count: 1,
+	},
+	{
+		before: `pickerAction(\`roles:\${action}\`, label, key, primary ? { primary: true } : undefined);`,
+		after: `pickerAction(\`roles:\${action}\`, __zhompModelHubText(label), key, primary ? { primary: true } : undefined);`,
+		count: 1,
+	},
+];
+
+const DESCRIBED_COMPACTION_ONLY_PATCHES: readonly ExactPatch[] = [
+	{
+		before: `const labelText =
+				strip.purpose === "compaction"
+					? \`\${strip.model.id} limit:\`
+					: strip.purpose === "preset"
+						? "Preset name:"
+						: "New role name:";`,
+		after: `const labelText =
+				strip.purpose === "compaction"
+					? \`\${strip.model.id} \${__zhompModelHubText("limit:")}\`
+					: strip.purpose === "preset"
+						? __zhompModelHubText("Preset name:")
+						: __zhompModelHubText("New role name:");`,
+		count: 1,
+	},
+	{
+		before: `\`roles:\${action}\`,\n\t\t\t\t\tlabel,`,
+		after: `\`roles:\${action}\`,\n\t\t\t\t\t__zhompModelHubText(label),`,
+		count: 1,
+	},
+	{
+		before: `compactionConfirmPending(strip) ? "Accept compaction point" : "Set compaction point"`,
+		after: `__zhompModelHubText(compactionConfirmPending(strip) ? "Accept compaction point" : "Set compaction point")`,
+		count: 1,
+	},
+	{
+		before: `span(" limit ", "muted"),`,
+		after: `span(__zhompModelHubText(" limit "), "muted"),`,
+		count: 1,
+	},
+	{
+		before: `return { text: COMPACTION_INPUT_HINT, style: "dim" };`,
+		after: `return { text: __zhompModelHubText(COMPACTION_INPUT_HINT), style: "dim" };`,
+		count: 1,
+	},
 ];
 
 const DESCRIBED_PRESET_UI_PATCHES: readonly ExactPatch[] = [
@@ -827,19 +1222,43 @@ const DESCRIBED_PRESET_UI_PATCHES: readonly ExactPatch[] = [
 function patchesFor(shape: ModelHubShape): ExactPatch[] {
 	const common = commonPatches(shape);
 	if (shape !== "legacy") {
-		const presetFooterPatches = shape === "described-presets"
-			? DESCRIBED_PRESET_FOOTER_PATCHES
-			: DESCRIBED_BASE_FOOTER_PATCHES;
+		const hasPresets = shape === "described-presets" || shape === "described-compaction-presets";
+		const hasCompaction = shape === "described-compaction-presets";
+		const footerVariant = hasCompaction ? DESCRIBED_COMPACTION_FOOTER_PATCHES : DESCRIBED_PRE_COMPACTION_FOOTER_PATCHES;
+		let presetFooterPatches: readonly ExactPatch[];
+		switch (shape) {
+			case "described-presets":
+				presetFooterPatches = DESCRIBED_PRESET_FOOTER_PATCHES;
+				break;
+			case "described-compaction-presets":
+				presetFooterPatches = DESCRIBED_COMPACTION_PRESET_FOOTER_PATCHES;
+				break;
+			default:
+				presetFooterPatches = DESCRIBED_BASE_FOOTER_PATCHES;
+		}
+		const uiVariant = hasCompaction ? DESCRIBED_COMPACTION_ONLY_PATCHES : DESCRIBED_PRE_COMPACTION_ONLY_PATCHES;
 		return [
 			...common,
+			...PROVIDER_DISCOVERY_PATCHES,
+			...PROVIDER_ANSI_STATUS_PATCHES,
+			...PROVIDER_ANSI_LOCKED_PATCHES,
 			...DESCRIBED_STATUS_PATCHES,
 			...DESCRIBED_FOOTER_PATCHES,
+			...footerVariant,
 			...presetFooterPatches,
 			...DESCRIBED_ONLY_PATCHES,
-			...(shape === "described-presets" ? DESCRIBED_PRESET_UI_PATCHES : []),
+			...uiVariant,
+			...(hasPresets ? DESCRIBED_PRESET_UI_PATCHES : []),
 		];
 	}
-	return [...common, ...LEGACY_STATUS_PATCHES, ...LEGACY_FOOTER_PATCHES];
+	return [
+		...common,
+		...PROVIDER_DISCOVERY_PATCHES,
+		...PROVIDER_ANSI_STATUS_PATCHES,
+		...PROVIDER_ANSI_LOCKED_PATCHES,
+		...LEGACY_STATUS_PATCHES,
+		...LEGACY_FOOTER_PATCHES,
+	];
 }
 
 
@@ -868,8 +1287,40 @@ function modulePathKey(path: string): string {
 	return process.platform === "win32" ? absolute.toLowerCase() : absolute;
 }
 
+type ModelTranslationDiagnosticReporter = (message: string) => void;
+
+const pendingModelTranslationDiagnostics: string[] = [];
+let modelTranslationDiagnosticReporter: ModelTranslationDiagnosticReporter | undefined;
+
+export function setModelTranslationDiagnosticReporter(reporter: ModelTranslationDiagnosticReporter | undefined): void {
+	modelTranslationDiagnosticReporter = reporter;
+	if (!reporter || pendingModelTranslationDiagnostics.length === 0) return;
+
+	const pendingCount = pendingModelTranslationDiagnostics.length;
+	for (let index = 0; index < pendingCount; index++) {
+		const message = pendingModelTranslationDiagnostics[index];
+		if (message === undefined) continue;
+		try {
+			reporter(message);
+		} catch {
+			if (index > 0) pendingModelTranslationDiagnostics.splice(0, index);
+			return;
+		}
+	}
+	pendingModelTranslationDiagnostics.splice(0, pendingCount);
+}
+
 function diagnostic(message: string): void {
-	console.log(`[zhomp] ${message}`);
+	const reporter = modelTranslationDiagnosticReporter;
+	if (!reporter) {
+		pendingModelTranslationDiagnostics.push(message);
+		return;
+	}
+	try {
+		reporter(message);
+	} catch {
+		pendingModelTranslationDiagnostics.push(message);
+	}
 }
 
 export function registerModelTranslation(modelHubPath: string, dictionary: Dictionary): void {
