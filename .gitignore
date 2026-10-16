@@ -13,3 +13,6 @@ Thumbs.db
 
 # 本地测试
 *.log
+
+# 本地代码索引
+.codegraph/

@@ -244,6 +244,7 @@ async function v10(): Promise<string> {
 			PI_CONFIG_DIR: relative(homedir(), join(root, "config")),
 			OMP_PROFILE: undefined,
 			PI_PROFILE: undefined,
+			OMP_ZH_DICT: undefined,
 			PROBE_DIR: root,
 			OMP_ZH_CONFIG: configPath,
 		};

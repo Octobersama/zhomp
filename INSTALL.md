@@ -32,7 +32,7 @@ bash scripts/install.sh
 
 安装命令会列出包路径和生成文件。看到“安装完成”只说明安装过程成功；还需执行下文的版本和设置界面验证。
 
-本轮新增 `/model` 基础文案翻译及运行文件 `model-ui.ts`，并在启动 preload 阶段注册转换。从旧安装升级时需重新运行安装脚本，部署完整扩展、字典、启动器和运行模块；只替换字典不足以启用新功能。
+Model 和斜杠命令说明在授权扩展加载时做内存显示转换。斜杠转换器嵌入现有扩展，不新增安装文件；升级后重新运行安装脚本即可部署新扩展和字典，无需更改卸载清单或 `package.files`。旧安装升级需重新运行安装脚本；只替换字典不足以启用新功能。
 
 ### 安装路径
 
@@ -102,7 +102,15 @@ zhomp
 
 固定文案在所选宿主的 ModelHub 模块解析前做内存转换；角色数据从不参与转换，角色名称和标签不因其为默认角色或与内建值匹配而翻译。源码锚点或出现次数不符时整页保留原文并记录 `[zhomp]` 诊断，不做模糊替换或配置改写。`zhomp --no-extensions` 和官方 `omp` 应保持英文。
 
-启动顺序：Model hook 由 preload 在宿主扩展加载器之前注册；设置元数据仍由 async 扩展 factory 翻译。两者遵循当前进程授权和宿主的禁用扩展参数语义。
+### 斜杠命令说明
+
+在交互终端输入 `/` 或 `/goal ` 查看命令及子命令补全；TUI autocomplete 显示层翻译核心内建命令、静态子命令，以及 OMP 附带的 `/init`、`/green`、`/review`、`/annotate`、`/autoresearch` 说明。canonical 英文 metadata 继续用于搜索与排序；命令名、别名、参数/选择值、处理器及 ACP/RPC 目录不变。运行时状态、动态快捷键说明及角色名称保留原文。
+
+只翻译已知命令名与 canonical 静态说明的精确匹配。公开 autocomplete 项不提供完整来源信息，同名同文的 file/user/extension 覆写也可能跟随翻译（如 `/init`、`/autoresearch`）；其他未知命令名或文案保持原文。
+
+`zhomp --no-extensions` 和官方 `omp` 的命令补全保持英文。该显示层转换不改写 registry metadata，也不改变搜索、排序或选择结果。
+
+启动顺序：Model hook 由 preload 在宿主扩展加载器之前注册；设置元数据由 async 扩展 factory 翻译，斜杠命令仅包装 TUI autocomplete provider 输出。各自遵循当前进程授权和宿主的禁用扩展参数语义。
 
 
 启动引导从宿主目录启动真实 `src/cli.ts`，preload 在宿主初始化前恢复调用者目录；不把源码 CLI 当库包装成另一主入口，因此保留宿主 worker 的主入口行为。对正常启动显式传入安装根的扩展，禁用扩展选项由宿主参数解析器解释。两个 Bun 启动边界各自提供分隔符，保留用户自己的 `--`；参数值中的 `--no-extensions` 不会被误当作选项，等号形式也遵循宿主语义。
@@ -153,7 +161,7 @@ bash scripts/uninstall.sh
 
 以下命令从源码仓库运行；开发测试不随用户安装包发布。
 
-全量行为测试包含真实宿主的字典覆盖检查，必须先安装兼容 OMP。测试与验证沿用安装器的包发现规则（含自定义 globalDir），显式路径或配置错误会失败，不会换用默认副本或静默跳过覆盖检查。字典门禁在原始 JSON 层检查重复键，并按明确的技术文本和数值单位保留规则检查显示字段，不以单词数量或整个设置类别豁免翻译。
+全量行为测试包含真实 SettingsHost 字典覆盖及真实 CombinedAutocompleteProvider 消费链。斜杠用例覆盖核心和附带命令、同步/异步补全、native 静态详情与动态状态、原始 item 的选择应用、冻结 provider 的安全跳过，以及原始英文描述/搜索/排序不变。测试与验证沿用安装器的包发现规则（含自定义 globalDir），显式路径或配置错误会失败。字典门禁在原始 JSON 层检查重复键，未命中文案不猜译。
 
 ```bash
 bun install --frozen-lockfile
@@ -165,9 +173,7 @@ bun run verify -- --require-all
 bun pm pack --dry-run --ignore-scripts
 ```
 
-验证入口按 V01–V11 输出 PASS/FAIL/SKIP，失败返回非零；`--require-all` 还拒绝 SKIP。V10 先安装到临时目录，再通过已安装的 `host.ts`、`launch.json` 和扩展，验证真实 SettingsHost 与 SettingsSelector 组件；此前 OMP 18.4.12 验收输出 entries=397、loader=true、component=SettingsSelectorComponent，并检查动态 getter、配置 id/default/enum、共享 group 和普通 PID 隔离。组件渲染不冒充完整 `/settings` 交互；最终发布仍要求在真实终端打开该面板。
-
-V10 另以独立进程检查真实 ModelHub：普通 PID 隔离、正常字典及含引号/模板符号/替换符号的自定义字典；覆盖 ANSI 渲染、宿主提供的 native 描述、内建/自定义角色名称及标签保留原文、键盘选择的 role/provider/model/selector 不变、80/160 列宽度和独立 ModelBrowser 仍为英文。数据是隔离的显示夹具，无远程模型调用或配置持久化；缺少 native 描述能力时明确打印 `unavailable@<版本>`，不冒充该渲染路径通过。最终仍需真实终端 `/model` 验收。
+验证入口按 V01–V11 输出 PASS/FAIL/SKIP，失败返回非零；`--require-all` 还拒绝 SKIP。V10 安装到临时根，通过已安装的 `host.ts`、`launch.json` 和扩展验证真实 SettingsHost/SettingsSelector、ModelHub 和 autocomplete 显示层。OMP 18.8.4 的 SettingsSelector entries=404；补全验证使用实际宿主 loader/factory，检查 `/set`、`/goal s`、英文描述查询 `/Generate`、附带命令与参数，以及用户项目命令来源排除。组件/provider 用例不执行模型请求或业务命令，也不冒充完整终端交互。
 
 
 此前在 OMP 18.4.12 的隔离原生终端中打开了实际 `/settings`：zhomp 的 tab、分组、设置名称及描述显示中文；官方 omp 即使显式加载同一扩展并继承启用标记，在授权 PID 不匹配时仍保持英文。该 smoke 使用临时 startup 配置关闭首次启动向导，没有配置模型或进行模型对话；它是界面抽查，不是所有条目逐项视觉验收。
@@ -176,8 +182,10 @@ Model 功能及角色名称保留修正在 Windows/Bun 1.4.2 上针对 OMP 18.3.
 
 OMP 18.8.4 适配轮在 Windows/Bun 1.4.2 上通过类型检查、24 个行为测试（含真实设置字典覆盖）及 V01–V11，无 SKIP。SettingsSelector 输出 entries=404，ModelHub ANSI/native、内建及自定义角色、预设名称身份和配置隔离断言通过。18.3.2、18.4.12 的缓存源码通过转换及语法检查，本轮未重跑这两个旧版本的完整运行时矩阵。已重新部署日常安装，并核对已安装字典和 Model runtime 的 SHA-256 与源码一致。助手尝试原生终端验收，但实时桌面控制授权两次超时，未打开实际面板。随后用户亲自检查 `/settings` 和 `/model`，确认页面正常；本轮真实交互验收依据为用户确认，不是助手截图，也不代表逐项视觉验收或其他平台通过。
 
+此前元数据翻译实现的 `slash 文本=221` 与 ConPTY 记录保留为历史结果，不代表当前显示层。当前输出层实现已在 Windows/Bun 1.4.2、OMP 18.8.4 上通过类型检查、32 个行为测试及 V01–V11（无 SKIP），并重新部署到默认 Windows 用户安装根（`%USERPROFILE%`）；已安装扩展、字典和运行模块的 SHA-256 与源码一致。真实 Windows ConPTY 交互确认五个附带命令说明、`/annotate` 的五条参数说明、`/autoresearch off/clear` 和 `/goal s` 均为中文；英文 `/Generate` 仍可检索相关命令。再次通过 `/set` 打开 `/settings`，并打开 `/model` 查看角色列表，中文显示正常，DEFAULT、SMOL 及模型 ID 保持原文。测试只查看补全和两个面板，没有执行附带业务命令、发送模型消息、修改设置或角色赋值；使用隔离配置及进程级 fetch/TCP 阻断。最终 CLI 正常退出（exitCode=0），临时资产已清理。这是实际 CLI 的 ANSI 屏幕捕获，不是桌面截图或逐项视觉验收。
 
-发布包必须包含本指南、README、许可证、字典、扩展、两个安装/卸载入口及安装核心、启动引导、共享 `runtime/host.ts` 和 `runtime/model-ui.ts`。解包后需检查本地链接并运行安装命令，不能只凭打包退出码判断完整性。卸载清单包含两个安装后的运行模块，仍无需 Bun。
+
+发布包必须包含本指南、README、许可证、字典、扩展、两个安装/卸载入口及安装核心、启动引导、共享 `runtime/host.ts` 和 `runtime/model-ui.ts`。斜杠命令显示层逻辑嵌在现有扩展中，不新增部署文件。解包后需检查本地链接并运行安装命令，不能只凭打包退出码判断完整性。卸载清单包含两个安装后的运行模块，仍无需 Bun。
 
 历史本机验收（2.0.0）覆盖 OMP 18.3.2、Windows/PowerShell 5.1/cmd/Git Bash；2.1.0 本机 OMP 18.4.1 的 SettingsSelector 验证 entries=387 且动态描述中文可见。此前审查改进轮在 Windows 的 OMP 18.3.2、18.4.12 上通过 21 个行为测试及 V01–V11，SettingsSelector 分别渲染 entries=385 和 397。CI 覆盖 Windows/Linux/macOS 的最低版与当期最新版；本轮没有远端 CI 或其他 OS 验证结果，不应据此声称已通过。
 

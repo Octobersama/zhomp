@@ -1,5 +1,5 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface HostPackage {
 	packageDir: string;
@@ -12,6 +12,8 @@ export interface HostPackage {
 	modelHubPath: string;
 	cliCommandsPath: string;
 	cliArgsPath: string;
+	/** Resolved only when the selected host exposes the validated builtin registry layout. */
+	slashCommandsPath?: string;
 }
 
 export interface LaunchConfig {
@@ -68,6 +70,24 @@ function resolveHostModule(packageDir: string, specifier: string, label: string)
 		return path;
 	} catch (error) {
 		throw new Error(`Missing host source: ${label} (${error instanceof Error ? error.message : String(error)})`);
+	}
+}
+
+function resolveSlashCommandsPath(packageDir: string): string | undefined {
+	try {
+		const path = resolveHostModule(
+			packageDir,
+			"@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry",
+			"slash-commands/builtin-registry",
+		);
+		if (basename(path) !== "builtin-registry.ts" || basename(dirname(path)) !== "slash-commands") return undefined;
+		if (resolvePackageRoot(path, "@oh-my-pi/pi-coding-agent").packageDir !== packageDir) return undefined;
+		const source = readFileSync(path, "utf8");
+		if (!hasExport(source, "BUILTIN_SLASH_COMMAND_DEFS")) return undefined;
+		return path;
+	} catch {
+		// Slash metadata is optional so an unknown registry layout cannot block settings translation.
+		return undefined;
 	}
 }
 
@@ -137,6 +157,7 @@ export function validatePackage(input: string, range: string): HostPackage {
 	const cliArgsPath = resolveHostModule(packageDir, "@oh-my-pi/pi-coding-agent/cli/args", "cli/args");
 	const settingsDefsPath = resolveHostModule(packageDir, "@oh-my-pi/pi-tui/overlays/settings-defs", "pi-tui/overlays/settings-defs");
 	const modelHubPath = resolveHostModule(packageDir, "@oh-my-pi/pi-tui/overlays/model-hub", "pi-tui/overlays/model-hub");
+	const slashCommandsPath = resolveSlashCommandsPath(packageDir);
 
 	const requiredExports = [
 		[allSettingsPath, ["orderedSettings"]],
@@ -163,7 +184,7 @@ export function validatePackage(input: string, range: string): HostPackage {
 		throw new Error("Missing pi-tui settings definitions.");
 	}
 
-	return { packageDir, version, cliPath, tuiDir, allSettingsPath, settingsUiPath, settingsDefsPath, modelHubPath, cliCommandsPath, cliArgsPath };
+	return { packageDir, version, cliPath, tuiDir, allSettingsPath, settingsUiPath, settingsDefsPath, modelHubPath, cliCommandsPath, cliArgsPath, slashCommandsPath };
 }
 
 function parsePersistedLaunchConfig(value: unknown): PersistedLaunchConfig {

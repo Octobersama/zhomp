@@ -2,11 +2,12 @@
 
 ## 未发布
 
-- `/model` 适配 OMP 18.8.4：新增预设切换提示及预设栏目固定文案翻译；预设实际名称仍保留原文。保留 18.3.2 和 18.4.12 的旧 ModelHub 形状，未知形状继续原文加载。
+- 斜杠命令静态说明改为 TUI autocomplete 输出层转换：覆盖核心内建命令和子命令，以及 OMP 附带的 `/init`、`/green`、`/review`、`/annotate`、`/autoresearch`。英文 canonical metadata 及搜索/排序不变；命令值、别名、参数/选择值、处理器和 ACP/RPC 数据不变。动态状态、model role 及其他动态说明保留原文。公开补全项不带完整来源信息；同名且说明精确匹配 canonical 文案的 file/user/extension 覆写也可能跟随翻译（如 `/init`、`/autoresearch`），而其他未知命令名或文案保持原文。
 - 新增 OMP 18.8.4 的设置文案覆盖，包括标题图标、思考区块、顾问冷却和归档选项；支持范围仍为 `>=18.3.2 <19`。
-- 本轮 OMP 18.8.4 通过类型检查、24 个行为测试及 V01–V11；SettingsSelector entries=404，ModelHub ANSI/native、角色及模型逻辑值保持不变。18.3.2、18.4.12 仅重验源码转换及语法；用户已亲自检查并确认 18.8.4 的 `/settings`、`/model` 页面正常。
-- 新增 `/model` 部分汉化：标题、基础说明、操作提示和通用空状态；角色名称及标签（包括 DEFAULT、SMOL 等内建角色和自定义角色）作为专有名词保留原文，模型/provider/ID、快捷键及技术参数也保留原文。不会翻译独立的 Alt+P 模型选择器。
-- Model 文案转换在授权启动 preload 中、宿主组件导入前注册；只改所选 ModelHub 的内存源码，未知形状原文加载，`--no-extensions` 和官方命令保持隔离。角色数据从不参与文案转换。安装/无 Bun 卸载同步新增 `model-ui.ts`；旧安装需重新运行安装脚本升级。
+- 当前 OMP 18.8.4 显示层实现通过类型检查、32 个行为测试及 V01–V11（无 SKIP）；SettingsSelector entries=404，ModelHub ANSI/native 路径通过。此前的 `slash 文本=221` 是旧元数据实现的历史计数，不用于当前显示层。
+- 已重新部署日常安装。真实 Windows ConPTY 验证五个附带命令及 `/annotate`、`/autoresearch`、`/goal` 参数补全，并确认英文 `/Generate` 检索、`/settings` 与 `/model` 页面正常；角色名保留原文。隔离测试没有模型消息、设置变更或角色赋值，最终进程正常退出。
+- `/model` 部分汉化标题、基础说明、操作提示和空状态；内建及自定义角色名称/标签、模型/provider/ID、快捷键和技术参数保持原文，不改 Alt+P 的独立模型选择器。
+- Model 转换在授权 preload 中注册，仅改所选 ModelHub 内存源码；未知形状原文加载，官方命令与 `--no-extensions` 隔离。安装与无 Bun 卸载包含 `model-ui.ts`，旧安装需重新运行安装脚本。
 - 新增 42 条设置显示翻译，覆盖本轮发现的 38 个真实覆盖缺口，以及 Braille、Pulse、Ultrafast 和 transfer.sh-compatible endpoint 文本。
 - OMP 支持范围保持 `>=18.3.2 <19`；翻译适配针对 OMP 18.3.2、18.4.12 和 18.8.4。上游版本记录：[OMP 18.8.4](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/CHANGELOG.md)。
 - 安装、启动、扩展与验收统一宿主身份／具体版本及实际模块路径契约；通过 `OMP_ZH_CONFIG` 传递安装配置，新增随安装部署的 `host.ts`。旧安装需重新运行安装脚本升级。

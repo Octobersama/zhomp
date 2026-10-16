@@ -18,12 +18,13 @@ zhomp 提供非破坏性、可卸载的 OMP 中文设置界面。安装、升级
 - 日志前缀 `[zhomp]`。字典无效时安全跳过，未命中原文保持不变；计数日志不能代替实际界面验证。
 - 字典 UTF-8 JSON；保留专有名词、单位、数字、文件名和逻辑键。字典更新需重新安装或更新已安装字典。
 - `/model` 仅由 preload 对验证过的 ModelHub 绝对路径做固定基础文案转换；角色数据不参与文案转换，角色名称和标签（包括 DEFAULT、SMOL 等内建值及用户自定义名称）作为专有名词保留原文。模型/provider/selector 逻辑值不变；栏目标题可翻译。未知源码原文加载，不改官方文件、共享 ModelBrowser 或 prototype。验收覆盖中英混合基础 UI 与原文角色，并覆盖 ANSI 和宿主提供的 native 描述。
+- `/` 仅包装 TUI autocomplete provider 的显示输出，精确转换核心内建命令及其静态子命令说明，以及显式覆盖的 OMP 附带命令 `/init`、`/green`、`/review`、`/annotate`、`/autoresearch`。英文 canonical metadata 继续用于搜索与排序；ACP/RPC 目录、命令值/别名、参数和选择值、handler 不变。实时状态、动态快捷键及 model role 保留原文。公开补全项不带完整来源信息；同名且说明精确匹配 canonical 文案的 file/user/extension 覆写也可能翻译（如 `/init`、`/autoresearch`）；其他未知命令名或文案保持原文。
 
 ## 安装生命周期
 
 - sh/PowerShell 安装入口调用同一 Bun 核心；包定位、版本校验、产物准备与失败恢复集中处理。
 - home 优先 `OMP_ZH_HOME` → Windows `USERPROFILE` → `HOME` → 系统用户目录。包位置与安装根分开，显式字典变量优先。
-- 新增运行文件时，同时更新安装产物、卸载清单和 package.files；不留下旧副本/兼容别名。
+- 斜杠命令转换嵌在现有扩展，无新增安装文件；升级重新安装即可，不需改卸载清单或 `package.files`。
 - PowerShell 输出使用英文，路径操作使用 `-LiteralPath`；用户路径不能编码为 ASCII 字面量。shell 文件实际字节及 Git 属性均为 LF。
 - 先删自有文件，再删空目录；卸载保留用户旁文件且不依赖 Bun。文件替换失败恢复旧文件，不宣称跨目录掉电原子性。
 

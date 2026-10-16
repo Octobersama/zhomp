@@ -1,5 +1,86 @@
 # zhomp main 全库审查与分阶段改进计划
 
+## 当前执行计划：main 全库可维护性改进
+
+本节对应 main `300477b` 上的当前工作区，覆盖本轮严格审查的全部 8 项结论。下方原有编号章节保留为历史审查和实施记录；其中的旧版本、旧优先级与“尚未执行”描述不代表本节进度。保留全部既有工作区修改，不提交、不发布、不升级全局 OMP、不安装到默认用户目录。
+
+### 问题、优先级与关闭条件
+
+优先级按影响和证据区分：P1 是已复现的非破坏性安装风险；P2 是已复现的行为缺陷或具体的验收缺口；P3 是数据维护或未来布局兼容风险，不宣称当前支持版已因该风险失效。
+
+| 编号 | 优先级／证据 | 改进项 | 关闭条件 |
+|---|---|---|---|
+| M01 | P3；当前路径一致，未来风险为静态推导 | 保留宿主实际解析的 settings-defs 路径，统一宿主身份、版本和模块路径契约 | 安装、启动、扩展均使用同一解析实现；导出路径改变但接口不变的宿主夹具仍消费同一模块；真实 OMP 组件验收通过 |
+| M02 | P2；真实宿主参数解析已比较 | 启动器按宿主语义识别禁用扩展，不再用字符串 includes 猜测 | 参数值中的 `--no-extensions` 不误禁用，等号形式正确禁用，`--` 后正文不当作选项；实际 launcher 回归通过 |
+| M03 | P1；Windows 已复现原链接丢失 | 使用不跟随链接的目标检查，保护悬空符号链接 | 有效及悬空链接在任何发布前被拒绝；原链接、旁文件和目录状态不变；普通文件故障回滚仍通过 |
+| M04 | P2；直接调用真实翻译入口已复现 | 动态 getter 首次未命中时也保持后续实时翻译 | 未命中→命中→未命中状态转换正确，重复加载不叠加包装，静态只读字段拒绝时不留下部分翻译 |
+| M05 | P3；原始 JSON 检出 11 个重复键、3 个值冲突 | 每键只保留当前最后生效译文，建立原始数据唯一性检查 | 去重前后解析值完全相同；原始键无重复；检查能拒绝包含转义等价键的重复定义 |
+| M06 | P2；自定义 globalDir 与默认目录规则存在确定分歧 | 验收与覆盖测试复用安装器的宿主发现规则 | 两个目录同时存在不同宿主时，安装与验收选择相同目标；明确配置错误不得被默认副本掩盖 |
+| M07 | P2；非规范 fixture 版本被 Bun 接受已观察 | 从 peer 范围派生规范最低版本，供夹具与 CI 使用 | 不再把 `18.3.2 <19` 当版本；host manifest 必须是规范版本；夹具和 CI 下界无独立硬编码真源 |
+| M08 | P2；四条已补译文本被现有过滤器豁免 | 收窄覆盖规则，只明确保留技术文本和数值单位 | 删除 Braille、Pulse、Ultrafast、transfer.sh-compatible endpoint 任一字典键会被覆盖检查发现；技术名称、单位、逻辑值仍保留 |
+
+### 实施设计与职责
+
+1. **宿主契约集中到 `runtime/host.ts`。** 它拥有包身份／规范版本／依赖范围检查、从选定宿主解析真实绝对模块路径、支持范围及最低版本解析、launch 配置读取。安装器保留环境／Bun 配置发现和文件发布职责，不让扩展依赖安装器的写文件逻辑。
+2. **跨进程只传安装配置位置。** 启动器设置进程绑定的启用标记和绝对 `OMP_ZH_CONFIG`；扩展从该配置同目录加载安装随附的 host 模块，读取配置并重新校验宿主。替换旧的运行时包目录／TUI 目录／范围环境协议，不保留兼容分支。安装阶段的显式 `OMP_ZH_PACKAGE_DIR` 继续作为用户支持的包选择选项；`OMP_ZH_DICT` 继续优先于默认字典。
+3. **真实模块身份贯穿消费链。** `HostPackage` 携带实际 registry、settings UI、settings-defs、CLI router／parser 和 CLI 入口路径；调用者不再次拼接 TUI 内部源码路径。保留安装、启动和翻译各阶段必要检查，而不是只在安装时检查一次。
+4. **动态描述按属性种类处理。** 区分 accessor 与数据属性；只为可配置的显示字段 getter 安装一次实时映射，继续保留宿主对象、数组和逻辑字段。预检和应用规则必须一致。
+5. **字典仍是单个 UTF-8 JSON。** 去重保留最后生效值，不重译既有条目，不因行数拆文件。开发检查在 JSON 解析丢失重复信息之前拒绝重复键；覆盖规则不再以单词数或整个功能类别判定无需翻译。
+6. **生命周期完整迁移。** 新增 host 运行文件同步进入安装产物、两个无 Bun 卸载入口、发布包与验收清单。测试、真实组件探针及文档一起迁移，删除旧导出、旧配置字段与旧运行时环境变量消费方。
+
+### 执行顺序与写入归属
+
+- 先记录本计划，再实施。沿用现有公开测试 seam：`translateSettings`、安装／发布入口、已安装 launcher、真实 SettingsHost／SettingsSelector，不增加生产诊断入口。
+- 生命周期切片负责宿主契约、安装与启动、符号链接保护、安装夹具与生命周期回归；翻译切片负责动态 getter、扩展的宿主契约消费和翻译回归；字典／验证切片负责去重、唯一性、覆盖规则及规范版本／CI 的消费迁移。
+- 共享 Interface 先约定，独立文件并行；同一文件只有一个写入负责人。主代理负责集成、运行所有测试及 smoke，子代理不运行构建／测试／格式化。
+- 已复现的三个行为缺陷不重复探测旧状态；把相同输入转为永久回归，在修复后重跑。新结构保留现有测试的用户可见断言，不新增只测转发、复制、源码拼写或布线的测试。
+
+### 验收路径
+
+| 编号 | 证据 | 负责人与边界 |
+|---|---|---|
+| A01 | 类型检查与完整行为测试，包括 M02–M08 的针对性回归 | 主代理；必须观察具体值／路径／保留状态，而非只断言不抛异常 |
+| A02 | `bun run verify -- --require-all`，覆盖安装、回滚、卸载、打包与真实宿主组件 | 主代理；V10 不是完整 `/settings` 交互，SKIP 不计 PASS |
+| A03 | 对已安装的真实 OMP 运行新参数语义、动态描述和新译文的独立 smoke | 主代理；隔离配置和安装目录，不触碰默认用户安装或凭据 |
+| A04 | 最低支持版与当前实际版的真实 SettingsHost／Selector 验收 | 主代理；最低版放独立目录，禁止降级全局宿主；跨 OS 结果只认可实际 CI／实机记录 |
+| A05 | 按最终内容打包、解包、安装并检查新运行文件可用及卸载完整 | 主代理；不能以 dry-run 或 `--version` 单独替代汉化证据 |
+
+### 当前进度与结果
+
+- [x] 记录 8 项问题、证据等级、实施 Interface 与验收路径。
+- [x] M01／M06：共享宿主契约、实际导出路径与统一发现；显式配置错误不降级为缺失宿主。
+- [x] M02：复用宿主参数解析；真实安装入口保留值形式、等号形式及用户 `--`。
+- [x] M03：有效／悬空链接在发布前拒绝；快照记录链接目标，普通文件回滚保持。
+- [x] M04：动态 getter 初始未命中→命中→未命中正确，重复加载复用包装。
+- [x] M05：去除 11 个重复定义，2270 个有效键值与去重前完全一致；原始 JSON 检查拒绝转义等价重复键。
+- [x] M07：具体 SemVer 校验，夹具和 CI 最低版本由 peer 范围派生。
+- [x] M08：明确技术文本及数值单位规则；真实显示词条的删除回归检查通过。
+- [x] A01／A02／A04：类型检查及两个真实宿主的行为／完整验证门禁通过。
+- [x] A03：隔离终端实际打开 zhomp 与官方 omp 的 `/settings`，分别观察中文和英文；动态转换及全部显示字段覆盖由上述回归与真实组件验证守护。
+- [x] A05：最终文档内容的 V11 打包／解包／安装验证通过，真实临时安装卸载成功；临时依赖、探针及失败测试目录已清理。
+
+| 当前证据 | 实际结果 |
+|---|---|
+| `bun run typecheck` | PASS |
+| OMP 18.4.12：`bun test tests` | 21 PASS，0 FAIL |
+| OMP 18.4.12：`bun run verify -- --require-all` | V01–V11 全部 PASS；V10 使用已安装产物，entries=397 |
+| 隔离 OMP 18.3.2：设置显式包路径后执行同一行为测试及完整验证 | 21 PASS，0 FAIL；V01–V11 全部 PASS；V10 entries=385 |
+| 原始字典键对与原有效对象比较 | 2270 个原始键、2270 个唯一键；有效值完全相同 |
+| 原生终端 OMP 18.4.12 `/settings` | zhomp 实际显示“外观／主题／深色主题”和中文描述；官方 omp 显式加载同一扩展并继承启用标记、使用错误授权 PID，仍显示 Appearance／Theme／Dark Theme 和英文描述 |
+| 最终文档更新后：`bun run verify -- --case V11 --require-all` | PASS；发布包包含 host.ts，解包后的安装器和真实宿主启动成功 |
+| CI 矩阵派生命令本机 smoke | 退出 0，输出 `["18.3.2","latest"]`；这不是远端 CI 运行结果 |
+| 实施资源清理 | 真实 UI 临时安装的 PowerShell 卸载器退出 0，移除 host.ts 等全部自有文件；最低版依赖、探针和失败测试目录已删除，测试窗口已关闭；截图保留为会话临时证据 |
+
+终端 smoke 使用临时安装、独立 agent/config 目录，以及关闭首次启动向导的临时 startup 配置；未配置模型或进行模型对话。终端抽查不等同于逐条目视觉验收，也不替代不同平台的 CI 结果。
+
+本次终端证据已逐图核对：中文截图 `omp-computer-1597388bc23700fe.png`，英文对照 `omp-computer-15973a8c3af70103.png`（本机会话临时截图，非发布产物）。中文描述为“终端背景较暗时使用的主题”，英文对照为“The theme used when the terminal has a dark background”；不以 AX 容器树代替这些可见文本。
+
+实施中额外定位了参数边界的根因：Bun 会消耗脚本参数开头的首个 `--`。生成的 Bash／cmd 入口和宿主子进程调用现在各自提供 Bun 的分隔符，再原样传递用户参数；原生启动回归通过真实安装入口执行，不通过删改预期值绕过问题。三次原生命令各有单进程期限，复合测试及验证调用方使用相应的整体期限；本机两个版本矩阵串行执行，并行启动造成的测试超时不计为通过。
+
+上述结果为本机 Windows／PowerShell／cmd／可用 Bash 的证据。Linux/macOS 仍由 CI 矩阵覆盖，本轮不宣称远端 CI 或其他 OS 已通过。默认安装目录及全局 OMP 未改变；最低版仅安装在临时目录。
+
+以下为保留的历史记录。
+
 ## 1. 结论与边界
 
 **结论：当前实现存在宿主适配阻断，当前工作区修改也不应按现有兼容承诺直接发布。** 首先应修复设置数据的实际消费入口，再处理启动语义、安装生命周期和验证缺口；继续增加字典条目不能解决这些问题。
@@ -348,7 +429,7 @@ git diff --check
 
 ## 8. 本轮实施记录
 
-用户通过 ask 选择仅支持 OMP **18.3.2**。`package.json` 的精确 peer 版本是安装器的真源，写入 `launch.json` 后供启动器和扩展验证；18.3.1/18.3.3 在目标文件写入前拒绝。因收窄支持范围，版本提升为 **2.0.0**，不保留旧 schema 兼容分支。
+本节保留 2.0.0 实施时的历史决策：当时用户选择了精确支持 OMP 18.3.2。2.1.0 已按用户的新要求改为 `>=18.3.2`；当前安装/启动/扩展均以兼容范围和真实宿主接口校验为准。
 
 ### 8.1 阶段结果
 
@@ -364,7 +445,7 @@ git diff --check
 
 ### 8.2 已观察的命令结果
 
-环境：Windows，Bun 1.4.2，真实全局 OMP/pi-tui 18.3.2，PowerShell 5.1，Git Bash。测试安装均使用临时根，未升级或卸载用户真实安装。
+环境：Windows，Bun 1.4.2，真实全局 OMP/pi-tui 18.4.1，PowerShell 5.1，Git Bash。测试安装使用临时根；本机生产安装的旧版本备份在 `.omp/zh-backups/`。
 
 | 命令/场景 | 实际结果 |
 |---|---|
@@ -373,23 +454,23 @@ git diff --check
 | `bun run typecheck` | 退出 0；严格 TypeScript 检查覆盖 extension/runtime/scripts/tests |
 | `bun run verify -- --require-all` | 退出 0，V01–V11 全部 PASS，无 SKIP |
 | `bun pm pack --dry-run --ignore-scripts` | 退出 0，15 个用户文件，含 INSTALL、CHANGELOG、runtime/zhomp.toml；不含审查报告、验证夹具和临时日志 |
-| 实际 tarball 的 V11 | 解包后文件与本地文档链接完整；包内安装入口执行成功，安装后输出 omp/18.3.2 |
+| 实际 tarball 的 V11 | 解包后文件与本地文档链接完整；包内安装入口执行成功，安装后启动当前宿主版本 |
 | `git diff --check` | 已跟踪工作区差异通过；未跟踪文档另行检查结构、尾空白和关键内容，不把本命令当成其验证 |
 | 工作流 YAML + package.files 文件存在性 | 解析及清单检查通过 |
 
 完整门禁的状态行：
 
 ```text
-PASS V01 exact 18.3.2; validated real host and TUI
+PASS V01 compatible >=18.3.2; host=18.4.1; tui=18.4.1
 PASS V02 translation boundary regression tests passed
 PASS V03 fixture read and launch observed caller cwd and process-bound authorization
 PASS V04 Unicode/space path and exit-code forwarding passed
-PASS V05 win32: native installer and installed real-host launcher output omp/18.3.2
+PASS V05 win32: native installer and installed real-host launcher output omp/18.4.1
 PASS V06 custom home owns extension, dictionary and launch configuration
-PASS V07 all publish failure points, exact version rejection, discovery and reinstall regressions passed
+PASS V07 all publish failure points, compatibility rejection, discovery and reinstall regressions passed
 PASS V08 both shell scripts are LF and parse in the available Bash
 PASS V09 native uninstallers removed all owned files twice and preserved normal/hidden/nested user files
-PASS V10 entries=385, loader=true, rendered=true, label=深色主题
+PASS V10 entries=387, loader=true, rendered=true, label=深色主题
 PASS V11 tarball contains every runtime/user document and its install command executes
 exit=0
 ```
@@ -416,3 +497,12 @@ exit=0
 - 本机验证不证明原生 macOS/Linux 已通过；对应 GitHub Actions 结果必须分别查看。代码已提供这些平台的安装及验证路径，没有伪造平台结果。
 - 不发布 npm 包、不创建 release/tag；本次用户授权范围是实施、Git 提交和推送。
 - 本轮按最终集成状态一次提交，保留用户原有字典增补和相关修复，不把中途失败探针写成成功证据。
+
+## 9. 2.1.0 兼容扩展补充
+
+- 用户要求取消单一目标版本限制；`package.json` 现为 `>=18.3.2 <19`，安装器、启动器和扩展以有界 semver 与实际宿主/TUI 依赖接口校验。
+- 本机实际宿主由 18.3.2 更新为 18.4.1。静态消费链仍为 `all-settings.orderedSettings()`、`settings-ui.createSettingsHost()` 和 pi-tui `settings-defs`。
+- 18.4.1 新增动态 getter 描述。旧实现对 getter 直接赋值会在 `tui.mouse` 等设置处抛出 `Attempted to assign to readonly property`；现改为预检全部显示字段，并为可配置 getter 安装保持动态读取的翻译 getter。不可配置只读字段会在任何修改前安全失败。
+- V10 用真实 18.3.2 与 18.4.1 分别验收：最低版 `entries=385`、新版 `entries=387`，两者真实 loader、SettingsHost、SettingsSelector 渲染均 PASS，无汉化失败日志；新版字典 2228 条，动态 getter 描述中文可读。
+- 安装能力门在文件存在之外检查 `orderedSettings`、`createSettingsHost`、router 与 TUI tab/group 导出；缺少必需入口的夹具在目标文件写入前拒绝。
+- 本机生产已经重装为 `supportedRange >=18.3.2 <19`、OMP 18.4.1。一次用于最低版验证的 Bun 环境变量未传入命令，曾临时将全局 OMP 降到 18.3.2；已立即重新安装 18.4.1，并再次核对 `omp --version` 与 V10。旧安装备份位于 `.omp/zh-backups/`，不属于安装器清单。
