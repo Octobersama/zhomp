@@ -1,13 +1,27 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "bun:test";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { renameSync, readFileSync, realpathSync, mkdirSync, existsSync, rmSync, symlinkSync } from "node:fs";
+import { renameSync, readFileSync, mkdirSync, existsSync, rmSync, symlinkSync } from "node:fs";
 import { discoverPackage, HostNotFoundError, install, publishArtifacts, resolveHome } from "../scripts/install-core";
 import { readLaunchConfig, readSupportPolicy, validatePackage } from "../runtime/host";
-import { createHostFixture, makeTempDir, removeTree, runCommand, snapshotTree, writeText } from "./verification-fixtures";
+import { createHostFixture, makeTempDir, removeTree, runCommand, sameFileSystemEntry, snapshotTree, writeText } from "./verification-fixtures";
 
 const repoDir = dirname(import.meta.dir);
 const { range, minimumVersion } = readSupportPolicy(repoDir);
+
+test("filesystem identity accepts directory aliases and rejects different directories", () => {
+	const root = makeTempDir("zhomp-path-identity");
+	try {
+		const target = join(root, "long directory name");
+		const other = join(root, "other directory");
+		const alias = join(root, "alias");
+		mkdirSync(target);
+		mkdirSync(other);
+		symlinkSync(target, alias, process.platform === "win32" ? "junction" : "dir");
+		strictEqual(sameFileSystemEntry(target, alias), true, "alternate names for the same directory must match");
+		strictEqual(sameFileSystemEntry(target, other), false, "two directories on the same device must not match");
+	} finally { removeTree(root); }
+});
 
 test("installation rejects older hosts but accepts compatible updates", () => {
 	const root = makeTempDir("zhomp-version");
@@ -19,7 +33,7 @@ test("installation rejects older hosts but accepts compatible updates", () => {
 		for (const newer of [minimumVersion, "18.4.1"]) {
 			const host = createHostFixture(join(root, newer), newer);
 			const result = install(repoDir, { OMP_ZH_HOME: join(root, `home-${newer}`), OMP_ZH_PACKAGE_DIR: host });
-			strictEqual(realpathSync(result.packageDir), realpathSync(host));
+			strictEqual(sameFileSystemEntry(result.packageDir, host), true);
 		}
 		const broken = createHostFixture(join(root, "broken"), "18.4.1");
 		rmSync(join(broken, "src", "config", "all-settings.ts"));
@@ -51,7 +65,7 @@ test("host settings paths follow the selected package's exported definitions lay
 			exports: { "./overlays/settings-defs": "./src/relocated/custom-settings.ts", "./*": "./src/*.ts" },
 		}));
 		const validated = validatePackage(packageDir, range);
-		strictEqual(realpathSync(validated.settingsDefsPath), realpathSync(redirectedDefs));
+		strictEqual(sameFileSystemEntry(validated.settingsDefsPath, redirectedDefs), true);
 		for (const path of [validated.cliPath, validated.allSettingsPath, validated.settingsUiPath, validated.settingsDefsPath, validated.cliCommandsPath, validated.cliArgsPath, validated.modelHubPath]) {
 			strictEqual(isAbsolute(path), true, path);
 		}
@@ -60,7 +74,7 @@ test("host settings paths follow the selected package's exported definitions lay
 		const configPath = join(root, "launch.json");
 		writeText(configPath, JSON.stringify({ packageDir, supportedRange: range, extensionPath, dictPath }));
 		const config = readLaunchConfig(configPath);
-		strictEqual(realpathSync(config.host.settingsDefsPath), realpathSync(redirectedDefs));
+		strictEqual(sameFileSystemEntry(config.host.settingsDefsPath, redirectedDefs), true);
 	} finally { removeTree(root); }
 });
 
@@ -68,8 +82,8 @@ test("explicit and independently configured global directories select the actual
 	const root = makeTempDir("zhomp-discovery");
 	try {
 		const host = createHostFixture(root, minimumVersion);
-		strictEqual(realpathSync(discoverPackage(range, { OMP_ZH_PACKAGE_DIR: host }).packageDir), realpathSync(host));
-		strictEqual(realpathSync(discoverPackage(range, { BUN_INSTALL_GLOBAL_DIR: root, BUN_INSTALL_BIN: join(root, "unrelated-bin") }).packageDir), realpathSync(host));
+		strictEqual(sameFileSystemEntry(discoverPackage(range, { OMP_ZH_PACKAGE_DIR: host }).packageDir, host), true);
+		strictEqual(sameFileSystemEntry(discoverPackage(range, { BUN_INSTALL_GLOBAL_DIR: root, BUN_INSTALL_BIN: join(root, "unrelated-bin") }).packageDir, host), true);
 		let explicitError: unknown;
 		try {
 			discoverPackage(range, { OMP_ZH_PACKAGE_DIR: join(root, "missing"), BUN_INSTALL_GLOBAL_DIR: root });
@@ -83,19 +97,19 @@ test("explicit and independently configured global directories select the actual
 		throws(() => discoverPackage(range, { USERPROFILE: malformedUser, HOME: malformedUser }));
 		const user = join(root, "user");
 		writeText(join(user, ".bunfig.toml"), `[install]\nglobalDir = ${JSON.stringify(root.replaceAll("\\", "/"))}\nglobalBinDir = ${JSON.stringify(join(root, "elsewhere").replaceAll("\\", "/"))}\n`);
-		strictEqual(realpathSync(discoverPackage(range, { USERPROFILE: user, HOME: user }).packageDir), realpathSync(host));
+		strictEqual(sameFileSystemEntry(discoverPackage(range, { USERPROFILE: user, HOME: user }).packageDir, host), true);
 		const defaultHome = join(root, "default-user");
 		const defaultHost = createHostFixture(join(defaultHome, ".bun", "install", "global"), minimumVersion);
-		strictEqual(realpathSync(discoverPackage(range, { USERPROFILE: defaultHome, HOME: defaultHome }).packageDir), realpathSync(defaultHost));
+		strictEqual(sameFileSystemEntry(discoverPackage(range, { USERPROFILE: defaultHome, HOME: defaultHome }).packageDir, defaultHost), true);
 		const customUser = join(root, "custom-user");
 		const customGlobal = join(root, "custom-global");
 		const configuredHost = createHostFixture(customGlobal, minimumVersion);
 		createHostFixture(join(customUser, ".bun", "install", "global"), "18.4.1");
 		writeText(join(customUser, ".bunfig.toml"), `[install]\nglobalDir = ${JSON.stringify(customGlobal.replaceAll("\\", "/"))}\nglobalBinDir = ${JSON.stringify(join(customUser, "separate-bin").replaceAll("\\", "/"))}\n`);
 		const configuredEnv = { USERPROFILE: customUser, HOME: customUser };
-		strictEqual(realpathSync(discoverPackage(range, configuredEnv).packageDir), realpathSync(configuredHost));
+		strictEqual(sameFileSystemEntry(discoverPackage(range, configuredEnv).packageDir, configuredHost), true);
 		const installed = install(repoDir, { ...configuredEnv, OMP_ZH_HOME: join(root, "custom-home") });
-		strictEqual(realpathSync(installed.packageDir), realpathSync(configuredHost));
+		strictEqual(sameFileSystemEntry(installed.packageDir, configuredHost), true);
 		rmSync(join(host, "src", "cli.ts"));
 		throws(() => validatePackage(host, range));
 	} finally { removeTree(root); }
@@ -214,11 +228,13 @@ test("installed launcher follows host parser semantics and clears inherited runt
 				bootstrapCwd: string | undefined;
 				launcherParentPid: string | undefined;
 			};
-			strictEqual(realpathSync(output.cwd), realpathSync(project));
-			strictEqual(output.config === undefined ? undefined : realpathSync(output.config), realpathSync(configPath));
+			strictEqual(sameFileSystemEntry(output.cwd, project), true, "launcher must restore the actual project directory");
+			if (output.config === undefined) throw new Error("The launcher did not provide its config path.");
+			strictEqual(sameFileSystemEntry(output.config, configPath), true);
 			strictEqual(output.enabled, "1");
 			strictEqual(output.pidMatches, true);
-			strictEqual(output.dict === undefined ? undefined : realpathSync(output.dict), realpathSync(join(project, "custom-dict.json")));
+			if (output.dict === undefined) throw new Error("The launcher did not resolve the explicit dictionary.");
+			strictEqual(sameFileSystemEntry(output.dict, join(project, "custom-dict.json")), true);
 			strictEqual(output.packageDir, undefined);
 			strictEqual(output.tuiPackageDir, undefined);
 			strictEqual(output.supportedRange, undefined);
@@ -228,7 +244,7 @@ test("installed launcher follows host parser semantics and clears inherited runt
 				strictEqual(output.args[0], "--extension");
 				const actualExtension = output.args[1];
 				if (actualExtension === undefined) throw new Error("The launcher did not inject the extension path.");
-				strictEqual(realpathSync(actualExtension), realpathSync(extensionPath));
+				strictEqual(sameFileSystemEntry(actualExtension, extensionPath), true);
 				deepStrictEqual(output.args.slice(2), scenario.args);
 			} else {
 				deepStrictEqual(output.args, scenario.args);

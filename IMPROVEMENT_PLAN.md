@@ -81,7 +81,7 @@
    - 已读取真实失败 run：`38967480486`（`6cae446`）；Ubuntu 最低版 job `117197510813`、macOS 最新版 `117197510302`、Windows 最新版 `117197510400`。五个矩阵任务在行为测试失败，Ubuntu latest 通过；不是所有失败都来自 R01／R02。
    - R07a：最低版 Model 源码返回 unsupported；定位有限补丁的旧版形状／出现次数，恢复实际支持，不能改测试为接受跳过。Model 切片负责。
    - R07b：最低版 `/prewalk` 的 `Arm or restart a one-shot model handoff` 缺译；另有 bare `/`、自定义 `/init` 和不存在的 nativeDetail 断言与旧补全接口不符。字典由 Model 切片补齐，主代理负责补全真实消费链适配。
-   - R07c：macOS `/var` 与 `/private/var`、Windows `RUNNER~1` 与 `runneradmin` 指向同一目录，但测试作字面路径比较；生命周期切片以真实路径身份修正期望，检查 verify 中相同假设，不篡改 launcher 的实际 cwd。
+   - R07c：macOS `/var` 与 `/private/var`、Windows `RUNNER~1` 与 `runneradmin` 指向同一目录，但测试作字面路径比较。首次 realpath 修正仅解决 macOS；Actions #4 进一步证明 Bun 仍保留 Windows 8.3 别名。最终测试／验收层使用 bigint `stat.dev`＋`stat.ino` 比较实际文件系统对象，不篡改 launcher 的 cwd；目录别名相同、不同目录必须不同。
    - R07d：Windows slash 首次宿主导入耗时超过默认 5 秒。主代理分离有明确时限的冷初始化和行为断言；不直接放大所有测试 timeout。
    - R07e：macOS 专属 Apple 选项的原名及 `macOS dictionary completions` 被覆盖门禁拒绝。保留专有名词 Apple，补译固定说明；设置切片收窄豁免，Model 切片拥有字典写入。
 2. 将失败映射到已修复项或同一交付中的真实跨平台问题；不关闭测试、降低门槛、扩大 timeout 掩盖挂起，亦不凭本机通过声称 Linux／macOS 通过。
@@ -118,6 +118,10 @@
 验证中发现并修正的测试前提：scoped native subtitle 是 `--models scope`，清空角色提示须使用独立 unscoped hub；unscoped hub 合法刷新本地 registry，不能污染 scoped 零刷新计数；ANSI 新回退提示包含按键和分段文案，不能拿 native 裸标题作整句期望。上述调整保留真实可见译文和逻辑身份断言，没有通过改变生产行为迁就测试。
 
 最终集成门禁补充：上述修正完成后，针对最终运行代码重新串行执行两版的完整 `bun test tests` 与 `bun run verify -- --require-all`，18.11.3 和 18.3.2 均为 38 PASS、V01–V11 全部 PASS，退出 0、无 SKIP；不是仅拼接早期分段结果。18.4.12 的最终 native 定向 V10 另有通过证据。
+
+Actions #4（`eda41ea`，run `38986279171`）的 Linux／macOS 四个任务均成功，Windows 两个任务各 37／38 通过，唯一失败仍是 `realpathSync` 未展开 8.3 路径的 cwd 字符串比较。追加修复集中到 `tests/verification-fixtures.ts` 的文件系统身份比较，以及安装测试／verify 调用方，生产代码未改变。本机实际创建长／短路径别名，观察到 realpath 字符串不同但 inode 相同；在真正的 8.3 TEMP／TMP 下运行全部安装测试为 10 PASS、0 FAIL，类型检查通过。新增别名相同／不同目录不同的回归后总行为测试数为 39；这不把 #4 的 Windows 失败改写为成功，远端结果仍须看后续提交的实际 run。
+
+Windows 后续修正的本机验收：真实 8.3 TEMP／TMP 下 V03、V06 通过；`bun run typecheck` 通过；完整 `bun test tests` 为 39 PASS、0 FAIL。运行期翻译代码与已通过两个完整宿主矩阵及 ConPTY smoke 的候选相同，仅测试／验收的文件系统身份比较改变。
 
 下列章节为先前轮次的历史计划与证据，不作为本轮通过证明。
 

@@ -208,6 +208,8 @@ OMP 18.11.2／Windows／Bun 1.4.2 的类型检查与 34 个行为测试通过。
 
 上述运行代码完成全部修正后，再次串行执行 OMP 18.11.3 和 18.3.2 的完整行为测试及 `bun run verify -- --require-all`：两版均为 38 PASS、V01–V11 全部 PASS、退出 0、无 SKIP。18.4.12 保留独立 native V10 通过证据，不将该定向检查称为完整旧版／跨 OS 矩阵。
 
+后续真实 Actions #4 中 Linux／macOS 两个版本均通过，Windows 两个版本仅因 Bun `realpathSync()` 仍保留 8.3 短路径而在 cwd 断言失败。测试／验收已改为比较实际文件系统对象身份（bigint dev／ino），生产 cwd 不变；本机真实 8.3 TEMP／TMP 下 10 个安装测试通过，并新增目录别名与不同目录的区分回归，总行为用例数为 39。该记录不将 #4 的失败任务写成成功，修正后的远端状态以新提交的 Actions 为准。
+
 
 发布包必须包含本指南、README、许可证、`install-manifest.tsv`、字典、扩展、两个安装/卸载入口及安装核心，以及清单中列出的全部运行文件（包括 `host.ts`、`model-ui.ts`、`settings-ui.ts`、`diagnostics.ts` 与 `model-text.ts`）。新增运行文件在自有产物清单中登记，安装、无 Bun 卸载及发布完整性验收共同消费该清单。斜杠命令显示层仍嵌在现有扩展中。解包后需检查本地链接、安装命令及实际汉化消费链，不能以打包退出码或 `--version` 代替汉化证明。
 

@@ -8,7 +8,7 @@
 - V11 在真实解包安装上运行 SettingsHost／ModelHub 消费探针，并验证缺少已安装的 Model 文案目录时消费失败；不再以 `--version` 单独证明运行模块完整。
 - 设置元数据翻译改为完整 prepare 后统一 apply，删除校验包装图和生产未消费的计数；后部字段校验失败不会提前更新已有 live getter 的字典，保留原 getter／setter、对象及数组身份。
 - preload、Model、设置消费者和扩展共用 `runtime/diagnostics.ts`：统一通知队列与单个 `[zhomp]` 前缀，保留失败通知并在后续 UI 接入重试，session shutdown 解除旧 UI reporter；不向交互终端输出运行期诊断。
-- 安装、自有文件卸载及发布检查共用 `install-manifest.tsv`；卸载保持无 Bun、保留用户旁文件。修正验收中 macOS `/var`／`/private/var` 与 Windows 短路径／长路径的身份比较，不改变 launcher 的实际 cwd。
+- 安装、自有文件卸载及发布检查共用 `install-manifest.tsv`；卸载保持无 Bun、保留用户旁文件。验收以文件系统对象身份（bigint dev／ino）比较目录及文件，避免 macOS `/var`／`/private/var` 和 Bun realpath 仍保留的 Windows 8.3 别名误报；不改变 launcher 的实际 cwd。
 - 修正斜杠验收对旧宿主 bare `/` 同步补全和 nativeDetail 的错误要求；冷宿主模块导入移至独立有界初始化，单条行为断言不再承受 Windows 冷编译耗时。
 
 - 适配 OMP 18.11.1 的 ModelHub 压缩限制交互及新版 ANSI/native 文案结构，修复旧的精确源码锚点失配导致整页跳过汉化的问题。保留旧版形状与未知形状原文加载，不改角色、模型 ID、限制值或输入语法。

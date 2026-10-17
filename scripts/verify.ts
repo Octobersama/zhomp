@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { discoverPackage, expectedInstallationPaths, HostNotFoundError, install } from "./install-core";
 import { readSupportPolicy } from "../runtime/host";
 import type { HostPackage } from "../runtime/host";
-import { makeTempDir, removeTree, runCommand, snapshotTree, createHostFixture, writeText } from "../tests/verification-fixtures";
+import { makeTempDir, removeTree, runCommand, sameFileSystemEntry, snapshotTree, createHostFixture, writeText } from "../tests/verification-fixtures";
 import type { Env } from "./install-core";
 import type { CommandResult } from "../tests/verification-fixtures";
 
@@ -100,7 +100,7 @@ async function v03(): Promise<string> {
 		const state = await runCommand(bun, ["--no-install", "--no-env-file", config, launch, "launch"], { cwd: project, env: { ...process.env, OMP_ZH_BOOTSTRAP_CWD: "invalid-external-value", OMP_ZH_LAUNCHER_PARENT_PID: "-1" } });
 		assertion(state.exitCode === 0, state.stderr);
 		const observed: unknown = JSON.parse(state.stdout.trim());
-		assertion(observed !== null && typeof observed === "object" && "cwd" in observed && typeof observed.cwd === "string" && realpathSync(observed.cwd) === realpathSync(project), "launcher did not restore project cwd");
+		assertion(observed !== null && typeof observed === "object" && "cwd" in observed && typeof observed.cwd === "string" && sameFileSystemEntry(observed.cwd, project), "launcher did not restore project cwd");
 		assertion("enabled" in observed && observed.enabled === "1" && "pidMatches" in observed && observed.pidMatches === true, "launcher authorization was not process-bound");
 		writeText(join(project, "bunfig.toml"), 'preload = ["./missing-project-preload.ts"]\n');
 		const isolated = await runCommand(bun, ["--no-install", "--no-env-file", config, launch, "read", "./marker.txt"], { cwd: project });
@@ -171,7 +171,7 @@ async function v06(): Promise<string> {
 		const canonicalHomePrefix = `${realpathSync(home)}${sep}`;
 		assertion(typeof config.extensionPath === "string" && realpathSync(config.extensionPath).startsWith(canonicalHomePrefix), "extension path escaped custom home");
 		assertion(typeof config.dictPath === "string" && realpathSync(config.dictPath).startsWith(canonicalHomePrefix), "dictionary path escaped custom home");
-		assertion(typeof config.packageDir === "string" && realpathSync(config.packageDir) === realpathSync(packageDir), "host package path was not persisted");
+		assertion(typeof config.packageDir === "string" && sameFileSystemEntry(config.packageDir, packageDir), "host package path was not persisted");
 		assertion(config.supportedRange === supported, "supported range was not persisted");
 		const custom = join(root, "custom-dict.json");
 		writeText(custom, '{"Theme":"自定义主题"}');
@@ -181,7 +181,7 @@ async function v06(): Promise<string> {
 		});
 		assertion(result.exitCode === 0, result.stderr);
 		const observed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-		assertion(typeof observed.dict === "string" && realpathSync(observed.dict) === realpathSync(custom), "explicit relative dictionary did not take precedence");
+		assertion(typeof observed.dict === "string" && sameFileSystemEntry(observed.dict, custom), "explicit relative dictionary did not take precedence");
 		return "custom home owns every manifest artifact and resolves its configured paths";
 	});
 }
@@ -339,7 +339,7 @@ async function v10(): Promise<string> {
 		const installEnv = { ...process.env, OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: discovered.packageDir, OMP_ZH_INSTALL_SHELL: "bash" };
 		const installed = install(repoDir, installEnv);
 		assertManifestInstalled(repoDir, installEnv);
-		assertion(realpathSync(installed.packageDir) === realpathSync(discovered.packageDir), "real host installation selected a different package");
+		assertion(sameFileSystemEntry(installed.packageDir, discovered.packageDir), "real host installation selected a different package");
 		const configPath = join(home, ".omp", "zh", "launch.json");
 		const env = installedProbeEnvironment(root, configPath);
 		return verifyInstalledConsumers(discovered, env, ["ordinary", "translated", "hostile"]);

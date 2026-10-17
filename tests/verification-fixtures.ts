@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
@@ -41,6 +41,13 @@ export function removeTree(path: string): void {
 export function writeText(path: string, content: string): void {
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, content);
+}
+
+/** Windows 8.3 aliases can survive Bun realpath; compare the actual filesystem entries. */
+export function sameFileSystemEntry(left: string, right: string): boolean {
+	const leftStat = statSync(left, { bigint: true });
+	const rightStat = statSync(right, { bigint: true });
+	return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
 }
 
 /** Paths and file bytes are the rollback contract; directory timestamps are ignored. */
