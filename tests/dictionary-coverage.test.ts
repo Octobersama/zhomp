@@ -2,19 +2,16 @@ import { strictEqual } from "node:assert";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, test } from "bun:test";
+import { beforeAll, describe, test } from "bun:test";
 import { discoverPackage } from "../scripts/install-core";
 import { readSupportPolicy } from "../runtime/host";
 import { parseDictionaryText } from "./dictionary-validation";
 import type { Dictionary } from "./dictionary-validation";
+import { runCommand } from "./verification-fixtures";
 
 type DisplayField = {
 	text: string;
 	path: string;
-};
-
-type SettingsUiModule = {
-	createSettingsHost: () => { entries: ReadonlyArray<{ path: string; ui?: Record<string, unknown> }> };
 };
 
 type SettingsDefsModule = {
@@ -23,10 +20,50 @@ type SettingsDefsModule = {
 	TAB_GROUPS: Record<string, readonly string[]>;
 };
 
+type SettingsDisplaySnapshot = {
+	entries: ReadonlyArray<{ path: string; ui?: Record<string, unknown> }>;
+	defs: SettingsDefsModule;
+};
+
 const repoDir = dirname(import.meta.dir);
 const supportPolicy = readSupportPolicy(repoDir);
 const host = discoverPackage(supportPolicy.range);
 const dictionary = parseDictionaryText(readFileSync(join(repoDir, "dict", "zh-CN.json"), "utf8"));
+// The installed host paths are runtime-selected; only the child builds its display surface after scrubbing setting env vars.
+const settingsDisplayProbe = `
+void (async () => {
+	const allSettingsUrl = process.env.ZHOMP_TEST_ALL_SETTINGS_URL;
+	const settingsUiUrl = process.env.ZHOMP_TEST_SETTINGS_UI_URL;
+	const settingsDefsUrl = process.env.ZHOMP_TEST_SETTINGS_DEFS_URL;
+	if (!allSettingsUrl || !settingsUiUrl || !settingsDefsUrl) throw new Error("Missing installed settings module URLs");
+	const allSettings = await import(allSettingsUrl);
+	for (const setting of allSettings.orderedSettings()) {
+		if (typeof setting.envName === "string") delete process.env[setting.envName];
+	}
+	const [settingsUi, defs] = await Promise.all([
+		import(settingsUiUrl),
+		import(settingsDefsUrl),
+	]);
+	const entries = settingsUi.createSettingsHost().entries.map(({ path, ui }) => ({
+		path,
+		ui: ui ? {
+			tab: ui.tab,
+			label: ui.label,
+			description: ui.description,
+			warning: ui.warning,
+			group: ui.group,
+			options: ui.options,
+		} : undefined,
+	}));
+	process.stdout.write(JSON.stringify({
+		entries,
+		defs: { SETTING_TABS: defs.SETTING_TABS, TAB_METADATA: defs.TAB_METADATA, TAB_GROUPS: defs.TAB_GROUPS },
+	}));
+})().catch(error => {
+	console.error(error);
+	process.exitCode = 1;
+});
+`;
 
 const settingsTemplateKeys = [
 	"Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until {escape}",
@@ -37,8 +74,6 @@ const settingsTemplateKeys = [
 	"Show predicted word completions as inline hints: {tab} accepts with a space, {right} without",
 	"After a completed turn, ask the active model to predict your next message and show it as ghost text in the empty composer; {tab} or {right} inserts it without sending. Extra usage: every completed turn sends one more billed request over the whole conversation (counted in /stats)",
 	"When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
-	"Unset, it falls back to ${envName}.",
-	"${envName} overrides this setting while it is set.",
 ] as const;
 
 function addField(fields: DisplayField[], value: unknown, path: string): void {
@@ -86,6 +121,7 @@ const preservedTechnicalText: Record<string, true> = {
 	"AI": true,
 	"Amazon S3": true,
 	"Anthropic": true,
+	"Apple": true,
 	"APFS": true,
 	"api.kimi.com": true,
 	"api.moonshot.ai": true,
@@ -228,17 +264,30 @@ function findUncoveredFields(fields: readonly DisplayField[], dictionary: Dictio
 	);
 }
 
+let installedDisplayFields: DisplayField[] | undefined;
+
 async function readInstalledDisplayFields(): Promise<DisplayField[]> {
-	const [settingsUi, defs] = await Promise.all([
-		import(pathToFileURL(host.settingsUiPath).href) as Promise<SettingsUiModule>,
-		import(pathToFileURL(host.settingsDefsPath).href) as Promise<SettingsDefsModule>,
-	]);
-	const entries = settingsUi.createSettingsHost().entries;
-	strictEqual(entries.length > 0, true, "the real installed host must expose settings entries");
-	return collectDisplayFields(entries, defs);
+	if (installedDisplayFields) return installedDisplayFields;
+	const result = await runCommand(process.execPath, ["--no-install", "--no-env-file", "-e", settingsDisplayProbe], {
+		cwd: repoDir,
+		timeout: 25_000,
+		env: {
+			...process.env,
+			ZHOMP_TEST_ALL_SETTINGS_URL: pathToFileURL(host.allSettingsPath).href,
+			ZHOMP_TEST_SETTINGS_UI_URL: pathToFileURL(host.settingsUiPath).href,
+			ZHOMP_TEST_SETTINGS_DEFS_URL: pathToFileURL(host.settingsDefsPath).href,
+		},
+	});
+	strictEqual(result.exitCode, 0, result.stderr || "Isolated settings dictionary probe failed");
+	const snapshot = JSON.parse(result.stdout) as SettingsDisplaySnapshot;
+	strictEqual(snapshot.entries.length > 0, true, "the real installed host must expose settings entries");
+	installedDisplayFields = collectDisplayFields(snapshot.entries, snapshot.defs);
+	return installedDisplayFields;
 }
 
 describe("real installed settings dictionary coverage", () => {
+	// Keep cold selected-host imports outside the default test timeout.
+	beforeAll(async () => { await readInstalledDisplayFields(); }, 30_000);
 	test("covers semantic fields emitted by the installed settings UI", async () => {
 		const fields = await readInstalledDisplayFields();
 		const templateFields = settingsTemplateKeys.map((text, index) => ({ text, path: `settings template ${index}` }));

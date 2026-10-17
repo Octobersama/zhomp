@@ -5,7 +5,7 @@ import {
 } from "node:fs";
 import type { Stats } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, posix, resolve } from "node:path";
 import { readSupportPolicy, validatePackage } from "../runtime/host";
 import type { HostPackage } from "../runtime/host";
 
@@ -22,6 +22,78 @@ export interface Artifact {
 	path: string;
 	content: string | Uint8Array;
 	mode?: number;
+}
+
+type ManifestKind = "extension" | "dictionary" | "launch" | "copy" | "config" | "launch-json" | "bash-launcher" | "cmd-launcher";
+type ManifestPlatform = "all" | "unix-or-bash" | "windows";
+
+interface InstallManifestEntry {
+	kind: ManifestKind;
+	source: string;
+	destination: string;
+	platform: ManifestPlatform;
+}
+
+function isManifestKind(value: string): value is ManifestKind {
+	return value === "extension" || value === "dictionary" || value === "launch" || value === "copy" || value === "config" ||
+		value === "launch-json" || value === "bash-launcher" || value === "cmd-launcher";
+}
+
+function readInstallManifest(repoDir: string): InstallManifestEntry[] {
+	const text = readFileSync(join(repoDir, "install-manifest.tsv"), "utf8");
+	if (text.includes("\r")) throw new Error("The install manifest must use LF line endings.");
+	const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
+	if (lines.length === 0 || lines.some(line => line.length === 0)) throw new Error("The install manifest contains an empty row.");
+	const entries = lines.map((line, index): InstallManifestEntry => {
+		const columns = line.split("\t");
+		const [kind, source, destination, platform] = columns;
+		if (columns.length !== 4 || kind === undefined || source === undefined || destination === undefined || platform === undefined ||
+			!isManifestKind(kind) || isAbsolute(destination) || destination.includes("\\") ||
+			!destination.split("/").every(part => part.length > 0 && part !== "." && part !== "..") ||
+			!(platform === "all" || platform === "unix-or-bash" || platform === "windows")) {
+			throw new Error(`Invalid install manifest row ${index + 1}.`);
+		}
+		const generated = kind === "launch-json" || kind === "bash-launcher" || kind === "cmd-launcher";
+		if ((generated && source !== "-") || (!generated && (source === "-" || isAbsolute(source) || source.includes("\\") ||
+			!source.split("/").every(part => part.length > 0 && part !== "." && part !== "..")))) {
+			throw new Error(`Invalid install manifest source on row ${index + 1}.`);
+		}
+		if ((kind === "bash-launcher" && platform !== "unix-or-bash") || (kind === "cmd-launcher" && platform !== "windows") ||
+			(!generated || kind === "launch-json") && platform !== "all") {
+			throw new Error(`Invalid install manifest platform on row ${index + 1}.`);
+		}
+		return { kind, source, destination, platform };
+	});
+	if (new Set(entries.map(entry => entry.destination)).size !== entries.length) throw new Error("The install manifest contains duplicate destinations.");
+	for (const kind of ["extension", "dictionary", "launch", "config", "launch-json", "bash-launcher", "cmd-launcher"] as const) {
+		if (entries.filter(entry => entry.kind === kind).length !== 1) throw new Error(`The install manifest must contain exactly one ${kind} entry.`);
+	}
+	return entries;
+}
+
+function selectedManifestEntries(entries: readonly InstallManifestEntry[], env: Env): InstallManifestEntry[] {
+	const selected: InstallManifestEntry[] = [];
+	for (const entry of entries) {
+		if (entry.platform === "all" || (entry.platform === "unix-or-bash" && (process.platform !== "win32" || env.OMP_ZH_INSTALL_SHELL === "bash")) ||
+			(entry.platform === "windows" && process.platform === "win32")) selected.push(entry);
+	}
+	return selected;
+}
+
+function requiredManifestEntry(entries: readonly InstallManifestEntry[], kind: ManifestKind): InstallManifestEntry {
+	const entry = entries.find(candidate => candidate.kind === kind);
+	if (!entry) throw new Error(`The install manifest is missing its ${kind} entry.`);
+	return entry;
+}
+
+function manifestTarget(homeDir: string, entry: InstallManifestEntry): string {
+	return join(homeDir, ...entry.destination.split("/"));
+}
+
+export function expectedInstallationPaths(repoDir: string, env: Env = process.env): string[] {
+	const homeDir = resolveHome(env);
+	const entries = selectedManifestEntries(readInstallManifest(repoDir), env);
+	return entries.map(entry => manifestTarget(homeDir, entry));
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -149,6 +221,63 @@ export function publishArtifacts(artifacts: readonly Artifact[], replace: typeof
 	}
 }
 
+function materializeArtifact(
+	entry: InstallManifestEntry,
+	manifest: readonly InstallManifestEntry[],
+	repoDir: string,
+	homeDir: string,
+	host: HostPackage,
+	range: string,
+): Artifact {
+	const path = manifestTarget(homeDir, entry);
+	switch (entry.kind) {
+		case "extension":
+		case "launch":
+		case "copy":
+		case "config":
+			return { path, content: readFileSync(join(repoDir, ...entry.source.split("/"))) };
+		case "dictionary": {
+			const content = readFileSync(join(repoDir, ...entry.source.split("/")));
+			const dictionary: unknown = JSON.parse(content.toString("utf8"));
+			if (!record(dictionary) || Object.values(dictionary).some(value => typeof value !== "string" || value.length === 0)) {
+				throw new Error("The bundled dictionary must contain nonempty string translations.");
+			}
+			return { path, content };
+		}
+		case "launch-json": {
+			const extensionPath = manifestTarget(homeDir, requiredManifestEntry(manifest, "extension"));
+			const dictPath = manifestTarget(homeDir, requiredManifestEntry(manifest, "dictionary"));
+			return { path, content: JSON.stringify({ packageDir: host.packageDir, supportedRange: range, extensionPath, dictPath }, null, 2) + "\n" };
+		}
+		case "bash-launcher": {
+			const configEntry = requiredManifestEntry(manifest, "config");
+			const launchEntry = requiredManifestEntry(manifest, "launch");
+			const configPath = posix.relative(posix.dirname(entry.destination), configEntry.destination);
+			const launchPath = posix.relative(posix.dirname(entry.destination), launchEntry.destination);
+			return {
+				path,
+				mode: 0o755,
+				content: `#!/usr/bin/env bash\nset -euo pipefail\nlauncher_dir="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"\nexec bun --no-install --no-env-file --config="$launcher_dir/${configPath}" "$launcher_dir/${launchPath}" -- "$@"\n`,
+			};
+		}
+		case "cmd-launcher": {
+			// Only ASCII syntax goes in this file; %~dp0 supplies the actual Unicode path.
+			const configEntry = requiredManifestEntry(manifest, "config");
+			const launchEntry = requiredManifestEntry(manifest, "launch");
+			const configPath = posix.relative(posix.dirname(entry.destination), configEntry.destination).replaceAll("/", "\\");
+			const launchPath = posix.relative(posix.dirname(entry.destination), launchEntry.destination).replaceAll("/", "\\");
+			return {
+				path,
+				content: `@echo off\r\nsetlocal DisableDelayedExpansion\r\nbun --no-install --no-env-file --config="%~dp0${configPath}" "%~dp0${launchPath}" -- %*\r\nexit /b %ERRORLEVEL%\r\n`,
+			};
+		}
+		default: {
+			const unreachable: never = entry.kind;
+			throw new Error(`Unsupported install manifest entry: ${unreachable}`);
+		}
+	}
+}
+
 export function install(repoDir: string, env: Env = process.env, replace: typeof renameSync = renameSync): { homeDir: string; packageDir: string; paths: string[] } {
 	const range = readSupportPolicy(repoDir).range;
 	const homeDir = resolveHome(env);
@@ -157,32 +286,9 @@ export function install(repoDir: string, env: Env = process.env, replace: typeof
 	if (!record(metadata) || !record(metadata.engines) || typeof metadata.engines.bun !== "string" || !Bun.semver.satisfies(Bun.version, metadata.engines.bun)) {
 		throw new Error("Bun version does not satisfy zhomp's package.json engines.bun.");
 	}
-	const extensionPath = join(homeDir, ".omp", "agent", "extensions", "zhomp.ts");
-	const zhDir = join(homeDir, ".omp", "zh");
-	const dictPath = join(zhDir, "dict.json");
-	const dictContent = readFileSync(join(repoDir, "dict", "zh-CN.json"));
-	const dictionary: unknown = JSON.parse(dictContent.toString("utf8"));
-	if (!record(dictionary) || Object.values(dictionary).some(value => typeof value !== "string" || value.length === 0)) {
-		throw new Error("The bundled dictionary must contain nonempty string translations.");
-	}
-	const artifacts: Artifact[] = [
-		{ path: extensionPath, content: readFileSync(join(repoDir, "extensions", "zhomp.ts")) },
-		{ path: dictPath, content: dictContent },
-		{ path: join(zhDir, "launch.ts"), content: readFileSync(join(repoDir, "runtime", "launch.ts")) },
-		{ path: join(zhDir, "host.ts"), content: readFileSync(join(repoDir, "runtime", "host.ts")) },
-		{ path: join(zhDir, "model-ui.ts"), content: readFileSync(join(repoDir, "runtime", "model-ui.ts")) },
-		{ path: join(zhDir, "settings-ui.ts"), content: readFileSync(join(repoDir, "runtime", "settings-ui.ts")) },
-		{ path: join(zhDir, "zhomp.toml"), content: readFileSync(join(repoDir, "runtime", "zhomp.toml")) },
-		{ path: join(zhDir, "launch.json"), content: JSON.stringify({ packageDir: host.packageDir, supportedRange: range, extensionPath, dictPath }, null, 2) + "\n" },
-	];
-	const binDir = join(homeDir, ".bun", "bin");
-	if (process.platform !== "win32" || env.OMP_ZH_INSTALL_SHELL === "bash") {
-		artifacts.push({ path: join(binDir, "zhomp"), mode: 0o755, content: '#!/usr/bin/env bash\nset -euo pipefail\nlauncher_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"\nexec bun --no-install --no-env-file --config="$launcher_dir/../../.omp/zh/zhomp.toml" "$launcher_dir/../../.omp/zh/launch.ts" -- "$@"\n' });
-	}
-	if (process.platform === "win32") {
-		// Only ASCII syntax goes into this file. %~dp0 supplies the actual Unicode path.
-		artifacts.push({ path: join(binDir, "zhomp.cmd"), content: '@echo off\r\nsetlocal DisableDelayedExpansion\r\nbun --no-install --no-env-file --config="%~dp0..\\..\\.omp\\zh\\zhomp.toml" "%~dp0..\\..\\.omp\\zh\\launch.ts" -- %*\r\nexit /b %ERRORLEVEL%\r\n' });
-	}
+	const manifest = readInstallManifest(repoDir);
+	const entries = selectedManifestEntries(manifest, env);
+	const artifacts = entries.map(entry => materializeArtifact(entry, manifest, repoDir, homeDir, host, range));
 	publishArtifacts(artifacts, replace);
 	return { homeDir, packageDir: host.packageDir, paths: artifacts.map(artifact => artifact.path) };
 }

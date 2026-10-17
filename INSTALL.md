@@ -2,7 +2,7 @@
 
 ## 支持范围
 
-zhomp 2.1 起支持 **OMP >=18.3.2 <19**、**Bun >=1.4.2**；历史本机验证覆盖 OMP 18.3.2、18.4.12、18.8.4、18.11.1，当前适配宿主为 **18.11.2**。CI 从 `package.json` 的 peer 范围派生最低支持版，与当期最新版组成矩阵；本机结果不代表其他平台或远端 CI。安装、启动和翻译复用 `runtime/host.ts` 的宿主契约，检查具体 SemVer 版本、包身份、pi-tui 依赖及显示接口，并从选定宿主解析实际模块绝对路径。兼容版本升级可继续使用现有 zhomp；19.x 或内部接口变化需更新 zhomp。
+zhomp 2.1 起支持 **OMP >=18.3.2 <19**、**Bun >=1.4.2**；历史本机验证覆盖 OMP 18.3.2、18.4.12、18.8.4、18.11.1、18.11.2，当前适配宿主为 **18.11.3**。CI 从 `package.json` 的 peer 范围派生最低支持版，与当期最新版组成矩阵；本机结果不代表其他平台或远端 CI。安装、启动和翻译复用 `runtime/host.ts` 的宿主契约，检查具体 SemVer 版本、包身份、pi-tui 依赖及显示接口，并从选定宿主解析实际模块绝对路径。兼容版本升级可继续使用现有 zhomp；19.x 或内部接口变化需更新 zhomp。
 
 ```bash
 bun --version
@@ -32,7 +32,7 @@ bash scripts/install.sh
 
 安装命令会列出包路径和生成文件。看到“安装完成”只说明安装过程成功；还需执行下文的版本和设置界面验证。
 
-授权 preload 在宿主导入设置 UI 和 ModelHub 之前，分别注册设置消费者及 ModelHub 的精确源码转换；async 扩展 factory 翻译 SettingsHost 元数据，斜杠命令说明在扩展中处理。所有转换仅修改内存显示。旧安装升级需重新运行安装脚本，部署扩展、新的 `settings-ui.ts`、ModelHub 运行模块和字典；只替换字典不足以启用新功能。
+授权 preload 在宿主导入设置 UI 和 ModelHub 之前，分别注册设置消费者及 ModelHub 的精确源码转换；async 扩展 factory 翻译 SettingsHost 元数据，斜杠命令说明在扩展中处理。所有转换仅修改内存显示。旧安装升级需重新运行安装脚本，部署扩展、运行模块和字典（含共享 `diagnostics.ts` 与 Model 固定文案目录 `model-text.ts`）；只替换字典不足以启用新功能。
 
 ### 安装路径
 
@@ -46,6 +46,8 @@ bash scripts/install.sh
 | `.omp/zh/host.ts` | 安装、启动及翻译共用的宿主身份、版本和模块路径契约 |
 | `.omp/zh/model-ui.ts` | Model 页精确模块路径及固定文案白名单转换，不改写官方文件 |
 | `.omp/zh/settings-ui.ts` | 真实设置消费者追加环境变量说明前的精确内存翻译；不改官方设置组件文件 |
+| `.omp/zh/diagnostics.ts` | preload／扩展共同的故障通知队列，仅在 UI 可用后发送 |
+| `.omp/zh/model-text.ts` | Model 固定显示文案白名单；与开发字典完整性检查共用 |
 | `.omp/zh/launch.json` | 宿主绝对目录、兼容范围、扩展和字典绝对路径；实际模块路径在启动时重新解析 |
 | `.omp/zh/zhomp.toml` | 独立 Bun 运行配置 |
 | `.bun/bin/zhomp` | Bash 安装时生成的命令 |
@@ -93,7 +95,7 @@ zhomp --version
 zhomp
 ```
 
-版本应输出当前实际安装的 `omp/<版本>`（当前为 `omp/18.11.2`）。在真实交互终端输入 `/settings`，检查 tab、分组、设置项、描述、选项和 warning 中已有字典覆盖的文本显示中文，例如“外观”“深色主题”。默认符号主题会将说明中的快捷键格式化为 `⎋`、`⇥` 等字符；这些仅作为说明的显示提示，保持原有快捷键和编辑行为。配置的实际值不会翻译，单位、专有名词和未命中文本保留原文。
+版本应输出实际安装的 `omp/<版本>`（当前适配 `omp/18.11.3`）。在真实交互终端输入 `/settings`，检查 tab、分组、设置项、描述、选项和 warning 中已有字典覆盖的文本显示中文，例如“外观”“深色主题”。默认符号主题会将说明中的快捷键格式化为 `⎋`、`⇥` 等字符；这些仅作为说明的显示提示，保持原有快捷键和编辑行为。配置的实际值不会翻译，单位、专有名词和未命中文本保留原文。
 
 用官方 `omp` 再打开 `/settings`，应保持英文。日志和 `--version` 都不能单独证明汉化：必须检查实际设置表面。若 `/settings` 被当普通消息发出，说明没有进入斜杠命令处理，应先检查交互终端启动方式。
 
@@ -155,7 +157,7 @@ macOS、Linux、Git Bash：
 bash scripts/uninstall.sh
 ```
 
-卸载无需 Bun。它删除上表的自有文件，仅当 `.omp/zh` 为空才删除目录；旁文件、隐藏文件、子目录、用户配置和会话保留。目录有其他文件也会删除自己的 `dict.json`。重复卸载不会删除额外内容。
+卸载无需 Bun。安装器与两个卸载入口共同读取发布目录根的 `install-manifest.tsv`，请保留卸载脚本与该清单的相对位置。它删除上表的自有文件，仅当 `.omp/zh` 为空才删除目录；旁文件、隐藏文件、子目录、用户配置和会话保留。目录有其他文件也会删除自己的 `dict.json`。重复卸载不会删除额外内容。
 
 自定义安装根时先设置与安装时相同的 `OMP_ZH_HOME`。Windows 路径按字面值处理，带方括号不作为通配符。
 
@@ -163,7 +165,7 @@ bash scripts/uninstall.sh
 
 以下命令从源码仓库运行；开发测试不随用户安装包发布。
 
-全量行为测试包含真实 SettingsHost 字典覆盖及真实 CombinedAutocompleteProvider 消费链。斜杠用例覆盖核心和附带命令、同步/异步补全、native 静态详情与动态状态、原始 item 的选择应用、冻结 provider 的安全跳过，以及原始英文描述/搜索/排序不变。测试与验证沿用安装器的包发现规则（含自定义 globalDir），显式路径或配置错误会失败。字典门禁在原始 JSON 层检查重复键，未命中文案不猜译。
+全量行为测试包含真实 SettingsHost 字典覆盖及真实 CombinedAutocompleteProvider 消费链。斜杠用例覆盖核心和附带命令、同步/异步补全、宿主提供的 native 静态详情与动态状态、原始 item 的选择应用、冻结 provider 的安全跳过，以及原始英文描述/搜索/排序不变。宿主冷导入在有独立时限的初始化阶段完成，不占用单条行为测试的默认时限。测试与验证沿用安装器的包发现规则（含自定义 globalDir），显式路径或配置错误会失败。字典门禁在原始 JSON 层检查重复键，并检查 Model 固定文案目录完整性；生产环境使用自定义字典时缺键仍保留原文。
 
 ```bash
 bun install --frozen-lockfile
@@ -200,8 +202,14 @@ OMP 18.11.2／Windows／Bun 1.4.2 的类型检查与 34 个行为测试通过。
 
 本轮 18.11.2 产物已更新到默认用户的生产安装（包含新增 `settings-ui.ts`），并直接使用生产路径再做隔离 ConPTY 验收：模型类型筛选、角色、Unicode Vim 说明、环境变量提示、设置及补全均通过，正常输出无原始 `[zhomp]` 日志。已有 omp 实例未重启、未终止；新开 zhomp 生效。
 
+本轮可维护性整改使用独立安装目录验证 OMP 18.3.2 与 18.11.3，各 38 个行为测试通过；V01–V09 通过，最终 V10／V11 定向重验通过。SettingsSelector entries 分别为 385／415；V11 对真实解包安装运行 SettingsHost／ModelHub 消费探针，并确认缺少已安装的 `model-text.ts` 时实际消费失败。OMP 18.4.12 的 V10 另行通过（entries=397）：native 描述可用，压缩限制能力不存在，二者分开报告。旧 native 回退赋值文案的精确补丁已从预设专属层移到公共 native 层。
 
-发布包必须包含本指南、README、许可证、字典、扩展、两个安装/卸载入口及安装核心、启动引导、共享 `runtime/host.ts`、`runtime/model-ui.ts` 和 `runtime/settings-ui.ts`。安装、无 Bun 卸载、故障恢复、`package.files` 与 V10 清单都必须包含新增的 `settings-ui.ts`；斜杠命令显示层仍嵌在现有扩展中，不新增部署文件。解包后需检查本地链接并运行安装命令，不能只凭打包退出码判断完整性。
+本轮后台 ConPTY 也实际打开 18.11.3 的 `/settings`、`/model` 和 `/Generate` 补全：启用时中文，`--no-extensions` 对照英文，两次 CLI 均退出 0，原始输出无 `[zhomp]`。终端使用过滤凭据的临时 home／agent，隔离安装的 launcher 与宿主均加载网络阻断，不发送模型消息或修改用户设置。本轮未更新默认用户生产安装，也未重启／终止已有 omp。远端跨 OS 结果以相应提交的 Actions run 为准，不能由本机 Windows 结果推定。
+
+上述运行代码完成全部修正后，再次串行执行 OMP 18.11.3 和 18.3.2 的完整行为测试及 `bun run verify -- --require-all`：两版均为 38 PASS、V01–V11 全部 PASS、退出 0、无 SKIP。18.4.12 保留独立 native V10 通过证据，不将该定向检查称为完整旧版／跨 OS 矩阵。
+
+
+发布包必须包含本指南、README、许可证、`install-manifest.tsv`、字典、扩展、两个安装/卸载入口及安装核心，以及清单中列出的全部运行文件（包括 `host.ts`、`model-ui.ts`、`settings-ui.ts`、`diagnostics.ts` 与 `model-text.ts`）。新增运行文件在自有产物清单中登记，安装、无 Bun 卸载及发布完整性验收共同消费该清单。斜杠命令显示层仍嵌在现有扩展中。解包后需检查本地链接、安装命令及实际汉化消费链，不能以打包退出码或 `--version` 代替汉化证明。
 
 历史本机验收（2.0.0）覆盖 OMP 18.3.2、Windows/PowerShell 5.1/cmd/Git Bash；2.1.0 本机 OMP 18.4.1 的 SettingsSelector 验证 entries=387 且动态描述中文可见。此前审查改进轮在 Windows 的 OMP 18.3.2、18.4.12 上通过 21 个行为测试及 V01–V11，SettingsSelector 分别渲染 entries=385 和 397。CI 覆盖 Windows/Linux/macOS 的最低版与当期最新版；本轮没有远端 CI 或其他 OS 验证结果，不应据此声称已通过。
 

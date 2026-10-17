@@ -1,168 +1,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { Dictionary } from "../extensions/zhomp";
+import { reportDiagnostic } from "./diagnostics";
+import { MODEL_HUB_TEXT_KEYS } from "./model-text";
 
-const MODEL_HUB_TEXT_KEYS = [
-	"Models",
-	"Roles",
-	"Roles:",
-	"All",
-	"Chat",
-	"Kinds",
-	"kinds",
-	"All models",
-	"Recent",
-	"Model",
-	"All available models",
-	"Recently used models",
-	"Model roles — {key} adds a retry fallback, cleared roles fall back to auto-selection",
-	"Model roles — ",
-	" adds a retry fallback, cleared roles fall back to auto-selection",
-	"No recently used models yet",
-	"No matching models in {provider}. Switch to All models to search every provider.",
-	"No matching models",
-	"No models from {provider} yet",
-	"No models available in this scope",
-	"New role",
-	"New role…",
-	"New role name:",
-	"New role name ",
-	"New fallback…",
-	"New fallback chain",
-	"New fallback chain…",
-	"fallback chain",
-	"fallback",
-	"Applying model…",
-	"Assigning",
-	"Adding fallback for",
-	"Replacing fallback of",
-	"assigns",
-	"cancels",
-	"picks the model it protects",
-	"picks the fallback model",
-	"Cleared roles fall back to auto-selection",
-	"Not assigned; no available model fits this role.",
-	"Name a custom role, then pick the model it runs on.",
-	"Pick the model (or provider) a new retry fallback chain protects.",
-	"New fallback chain — pick the model it protects",
-	"type to search",
-	"reorder",
-	"save preset",
-	"cancel",
-	"create + pick model",
-	"choose",
-	"assign/clear",
-	"save scope",
-	"thinking level",
-	"apply",
-	"keep",
-	"models",
-	"providers",
-	"roles",
-	"tabs",
-	"assign roles",
-	"pick fallback",
-	"pick the protected model",
-	"assign",
-	"rows",
-	"replace",
-	"add another",
-	"remove",
-	"thinking",
-	"add fallback",
-	"clear chain",
-	"new model/provider fallback chain",
-	"pick",
-	"clear",
-	"cycle",
-	"cycle:",
-	"{cycle} cycle is empty — press {add} on a role to add it",
-	"new",
-	"log in",
-	"refresh",
-	"close",
-	"Preset name:",
-	"Preset name ",
-	"Assign ",
-	" to",
-	"Thinking for ",
-	"Save ",
-	"(letters, digits, - and _)",
-	"Model fallback chains",
-	"Role",
-	"Save preset",
-	"Preset:",
-	"Preset ",
-	"custom",
-	"preset",
-	"Next preset",
-	"Create role",
-	"Apply",
-	"Save to scope",
-	"Assign / clear",
-	"Keep",
-	"Cancel",
-	"Refresh provider",
-	"Pick fallback",
-	"Pick model",
-	"Pick protected model",
-	"Assign",
-	"No model selected",
-	"Clear search",
-	"Earlier",
-	"Later",
-	"Leave cycle",
-	"Add to cycle",
-	"Add fallback",
-	"Clear",
-	"Thinking",
-	"Replace",
-	"Add another",
-	"Remove",
-	"Clear chain",
-	"Log in",
-	"Assign role",
-	"compaction limit",
-	"Compaction limit",
-	"accept compaction point",
-	"set compaction point",
-	"Accept compaction point",
-	"Set compaction point",
-	"limit:",
-	" limit ",
-	"400k base · f400k fixed · 80% · empty resets",
-	"Kind:",
-	"Search models…",
-	"kind",
-	"Kind roles",
-	"Chat roles",
-	"Fallback chain",
-	"Source",
-	"Close",
-	"Not signed in",
-	"Log in with OAuth",
-	"not configured",
-	"refreshing model list…",
-	"{count} models",
-	"Provider requires authentication before models can be discovered.",
-	"Provider has not been refreshed yet.",
-	"Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.",
-	"Using cached model list from {age}. Live refresh is still pending.",
-	"Using cached model list. Live refresh is still pending.",
-	"Provider unavailable. Using cached model list from {age}.",
-	"Provider unavailable.",
-	"{provider} has no credentials configured",
-	"Set {envVars} in your environment, or add a key in config.",
-	"Add an API key for this provider in config.",
-	"Sign in with /login",
-	"Set {envVars} to sign in",
-	"Add an API key in config to sign in",
-	"{count} models in catalog:",
-	"{count} models in catalog",
-	"{count} more",
-	"cycle {count}",
-	"Stop {count} of the quick-switch cycle",
-] as const;
 
 const LEGACY_MARKERS = [
 	"#footerHint(): string {",
@@ -171,6 +12,8 @@ const LEGACY_MARKERS = [
 	"#statusRow(width: number): string {",
 	"const RECENT_LIMIT = 15;",
 ];
+const LEGACY_1832_OAUTH_MARKER = 'theme.fg("accent", `  ${theme.nav.cursor} Log in with OAuth (Enter)`)';
+const PROVIDER_ANSI_OAUTH_MARKER = 'theme.fg("accent", `  ${theme.nav.cursor} Log in with OAuth (${formatKeyHint("enter")})`)';
 
 const DESCRIBED_MARKERS = [
 	"#footerHint(): string {",
@@ -239,6 +82,7 @@ function isSupportedShape(source: string): ModelHubShape | undefined {
 	if (source.includes("__zhompModelHub")) return undefined;
 	const described = countOccurrences(source, "#footerHints(): (NativeHint | undefined)[] {") === 1;
 	if (described) {
+		if (countOccurrences(source, LEGACY_1832_OAUTH_MARKER) !== 0 || countOccurrences(source, PROVIDER_ANSI_OAUTH_MARKER) !== 1) return undefined;
 		if (!DESCRIBED_MARKERS.every(marker => countOccurrences(source, marker) === 1)) return undefined;
 		const presetMarkerCounts = DESCRIBED_PRESET_MARKERS.map(marker => countOccurrences(source, marker));
 		const hasPresets = presetMarkerCounts.every(count => count === 1);
@@ -249,10 +93,12 @@ function isSupportedShape(source: string): ModelHubShape | undefined {
 		if (hasCompaction) return hasPresets ? "described-compaction-presets" : undefined;
 		return hasPresets ? "described-presets" : "described";
 	}
-	if (source.includes("#footerHints()") || source.includes("describeHubFrame(") || source.includes("DescribeContext")) {
-		return undefined;
-	}
-	return LEGACY_MARKERS.every(marker => countOccurrences(source, marker) === 1) ? "legacy" : undefined;
+	if (source.includes("#footerHints()") || source.includes("describeHubFrame(") || source.includes("DescribeContext")) return undefined;
+	if (!LEGACY_MARKERS.every(marker => countOccurrences(source, marker) === 1)) return undefined;
+	const legacyOauthCount = countOccurrences(source, LEGACY_1832_OAUTH_MARKER);
+	const providerOauthCount = countOccurrences(source, PROVIDER_ANSI_OAUTH_MARKER);
+	if (legacyOauthCount === 1 && providerOauthCount === 0) return "legacy";
+	return legacyOauthCount === 0 && providerOauthCount === 1 ? "legacy" : undefined;
 }
 
 function getTextTranslations(dictionary: Dictionary): Record<string, string> {
@@ -439,13 +285,24 @@ const PROVIDER_ANSI_LOCKED_PATCHES: readonly ExactPatch[] = [
 		count: 1,
 	},
 	{
-		before: 'theme.fg("accent", `  ${theme.nav.cursor} Log in with OAuth (${formatKeyHint("enter")})`)',
+		before: 'theme.fg("dim", `  ${catalogCount} models in catalog:`)',
+		after: 'theme.fg("dim", `  ${__zhompModelHubText("{count} models in catalog:", { count: String(catalogCount) })}`)',
+		count: 1,
+	},
+];
+
+const PROVIDER_ANSI_OAUTH_PATCHES: readonly ExactPatch[] = [
+	{
+		before: PROVIDER_ANSI_OAUTH_MARKER,
 		after: 'theme.fg("accent", `  ${theme.nav.cursor} ${__zhompModelHubText("Log in with OAuth")} (${formatKeyHint("enter")})`)',
 		count: 1,
 	},
+];
+
+const LEGACY_1832_OAUTH_PATCHES: readonly ExactPatch[] = [
 	{
-		before: 'theme.fg("dim", `  ${catalogCount} models in catalog:`)',
-		after: 'theme.fg("dim", `  ${__zhompModelHubText("{count} models in catalog:", { count: String(catalogCount) })}`)',
+		before: LEGACY_1832_OAUTH_MARKER,
+		after: 'theme.fg("accent", `  ${theme.nav.cursor} ${__zhompModelHubText("Log in with OAuth")} (Enter)`)',
 		count: 1,
 	},
 ];
@@ -594,7 +451,7 @@ const LEGACY_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 	{
 		before: `return \`Enter assign roles · ↑/↓ models · ← providers · type to search · Alt+←/→ kind\${refresh} · Esc close\`;`,
-		after: `return "Enter " + __zhompModelHubText("assign") + " " + __zhompModelHubText("roles") + " · ↑/↓ " + __zhompModelHubText("models") + " · ← " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + refresh + " · Esc " + __zhompModelHubText("close");`,
+		after: `return "Enter " + __zhompModelHubText("assign roles") + " · ↑/↓ " + __zhompModelHubText("models") + " · ← " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · Alt+←/→ " + __zhompModelHubText("kind") + refresh + " · Esc " + __zhompModelHubText("close");`,
 		count: 1,
 	},
 	{
@@ -692,7 +549,7 @@ const DESCRIBED_FOOTER_PATCHES: readonly ExactPatch[] = [
 	},
 	{
 		before: `return \`\${enter} assign roles · \${upDown} models · \${left} providers · type to search · \${altLeftRight} kind\${refresh} · \${cancel} close\`;`,
-		after: `return enter + " " + __zhompModelHubText("assign") + " " + __zhompModelHubText("roles") + " · " + upDown + " " + __zhompModelHubText("models") + " · " + left + " " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · " + altLeftRight + " " + __zhompModelHubText("kind") + refresh + " · " + cancel + " " + __zhompModelHubText("close");`,
+		after: `return enter + " " + __zhompModelHubText("assign roles") + " · " + upDown + " " + __zhompModelHubText("models") + " · " + left + " " + __zhompModelHubText("providers") + " · " + __zhompModelHubText("type to search") + " · " + altLeftRight + " " + __zhompModelHubText("kind") + refresh + " · " + cancel + " " + __zhompModelHubText("close");`,
 		count: 1,
 	},
 ];
@@ -946,6 +803,11 @@ const DESCRIBED_ONLY_PATCHES: readonly ExactPatch[] = [
 		{
 			before: `spans = [span("New fallback chain — pick the model it protects", "accent")];`,
 			after: `spans = [span(__zhompModelHubText("New fallback chain — pick the model it protects"), "accent")];`,
+			count: 1,
+		},
+		{
+			before: `spans = [span(\`\${verb} \`, "accent"), span(label, "accent strong")];`,
+			after: `spans = [span(__zhompModelHubText(verb) + " ", "accent"), span(label, "accent strong")];`,
 			count: 1,
 		},
 		{
@@ -1212,15 +1074,13 @@ const DESCRIBED_PRESET_UI_PATCHES: readonly ExactPatch[] = [
 		after: `\` · \${__zhompModelHubText("Cleared roles fall back to auto-selection")}\``,
 		count: 1,
 	},
-	{
-		before: `spans = [span(\`\${verb} \`, "accent"), span(label, "accent strong")];`,
-		after: `spans = [span(__zhompModelHubText(verb) + " ", "accent"), span(label, "accent strong")];`,
-		count: 1,
-	},
 ];
 
-function patchesFor(shape: ModelHubShape): ExactPatch[] {
+function patchesFor(shape: ModelHubShape, source: string): ExactPatch[] {
 	const common = commonPatches(shape);
+	const oauthPatches = shape === "legacy" && countOccurrences(source, LEGACY_1832_OAUTH_MARKER) === 1
+		? LEGACY_1832_OAUTH_PATCHES
+		: PROVIDER_ANSI_OAUTH_PATCHES;
 	if (shape !== "legacy") {
 		const hasPresets = shape === "described-presets" || shape === "described-compaction-presets";
 		const hasCompaction = shape === "described-compaction-presets";
@@ -1242,6 +1102,7 @@ function patchesFor(shape: ModelHubShape): ExactPatch[] {
 			...PROVIDER_DISCOVERY_PATCHES,
 			...PROVIDER_ANSI_STATUS_PATCHES,
 			...PROVIDER_ANSI_LOCKED_PATCHES,
+			...oauthPatches,
 			...DESCRIBED_STATUS_PATCHES,
 			...DESCRIBED_FOOTER_PATCHES,
 			...footerVariant,
@@ -1256,6 +1117,7 @@ function patchesFor(shape: ModelHubShape): ExactPatch[] {
 		...PROVIDER_DISCOVERY_PATCHES,
 		...PROVIDER_ANSI_STATUS_PATCHES,
 		...PROVIDER_ANSI_LOCKED_PATCHES,
+		...oauthPatches,
 		...LEGACY_STATUS_PATCHES,
 		...LEGACY_FOOTER_PATCHES,
 	];
@@ -1269,7 +1131,7 @@ export function translateModelHubSource(
 	try {
 		const shape = isSupportedShape(source);
 		if (!shape) return { source, translated: 0, supported: false };
-		const translatedSource = applyPatches(source, patchesFor(shape));
+		const translatedSource = applyPatches(source, patchesFor(shape, source));
 		if (translatedSource === undefined) return { source, translated: 0, supported: false };
 		const translations = getTextTranslations(dictionary);
 		const translated = Object.keys(translations).length;
@@ -1287,46 +1149,11 @@ function modulePathKey(path: string): string {
 	return process.platform === "win32" ? absolute.toLowerCase() : absolute;
 }
 
-type ModelTranslationDiagnosticReporter = (message: string) => void;
-
-const pendingModelTranslationDiagnostics: string[] = [];
-let modelTranslationDiagnosticReporter: ModelTranslationDiagnosticReporter | undefined;
-
-export function setModelTranslationDiagnosticReporter(reporter: ModelTranslationDiagnosticReporter | undefined): void {
-	modelTranslationDiagnosticReporter = reporter;
-	if (!reporter || pendingModelTranslationDiagnostics.length === 0) return;
-
-	const pendingCount = pendingModelTranslationDiagnostics.length;
-	for (let index = 0; index < pendingCount; index++) {
-		const message = pendingModelTranslationDiagnostics[index];
-		if (message === undefined) continue;
-		try {
-			reporter(message);
-		} catch {
-			if (index > 0) pendingModelTranslationDiagnostics.splice(0, index);
-			return;
-		}
-	}
-	pendingModelTranslationDiagnostics.splice(0, pendingCount);
-}
-
-function diagnostic(message: string): void {
-	const reporter = modelTranslationDiagnosticReporter;
-	if (!reporter) {
-		pendingModelTranslationDiagnostics.push(message);
-		return;
-	}
-	try {
-		reporter(message);
-	} catch {
-		pendingModelTranslationDiagnostics.push(message);
-	}
-}
 
 export function registerModelTranslation(modelHubPath: string, dictionary: Dictionary): void {
 	try {
 		if (!isAbsolute(modelHubPath)) {
-			diagnostic("model hub translation skipped: expected an absolute module path");
+			reportDiagnostic("model hub translation skipped: expected an absolute module path");
 			return;
 		}
 		const key = modulePathKey(modelHubPath);
@@ -1340,13 +1167,13 @@ export function registerModelTranslation(modelHubPath: string, dictionary: Dicti
 				build.onLoad({ filter }, ({ path }) => {
 					const source = readFileSync(path, "utf8");
 					const result = translateModelHubSource(source, translationsByPath.get(key) ?? {});
-					if (!result.supported) diagnostic(`model hub source shape unsupported; skipped ${path}`);
+					if (!result.supported) reportDiagnostic(`model hub source shape unsupported; skipped ${path}`);
 					// Bun's synchronous onLoad requires a result, including unchanged/unsupported source.
 					return { contents: result.source, loader: "ts", resolveDir: dirname(path) };
 				});
 			},
 		});
 	} catch (error) {
-		diagnostic(`model hub translation registration failed: ${error instanceof Error ? error.message : String(error)}`);
+		reportDiagnostic(`model hub translation registration failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }

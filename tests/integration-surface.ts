@@ -112,6 +112,13 @@ interface HostSetting {
 	ui?: { label?: string; description?: string };
 }
 
+interface RawSettingDescription {
+	path: string;
+	ui: NonNullable<HostSetting["ui"]>;
+	descriptor: PropertyDescriptor | undefined;
+	source: string;
+}
+
 interface SettingsSurfaceEntry {
 	path: string;
 	defaultValue: unknown;
@@ -176,14 +183,101 @@ function assertSameSlashSelection(base: SlashCompletionResult, wrapped: SlashCom
 	);
 }
 
-function renderDictionaryTemplate(dictionary: Record<string, string>, key: string, values: Record<string, string>): string {
-	const translated = dictionary[key];
-	if (typeof translated !== "string" || translated.length === 0) throw new Error(`Missing settings template translation: ${key}`);
-	let result = translated;
+function readRawSettingDescription(description: RawSettingDescription): string {
+	const value = description.descriptor?.get
+		? description.descriptor.get.call(description.ui)
+		: description.source;
+	if (typeof value !== "string") throw new Error(`Real settings description is not a string: ${description.path}`);
+	return value;
+}
+
+function readRawSettingDescriptions(settings: readonly HostSetting[]): RawSettingDescription[] {
+	const descriptions: RawSettingDescription[] = [];
+	for (const setting of settings) {
+		const ui = setting.ui;
+		if (!ui) continue;
+		const descriptor = Object.getOwnPropertyDescriptor(ui, "description");
+		const source = descriptor?.get ? descriptor.get.call(ui) : ui.description;
+		if (typeof source !== "string") throw new Error(`Real settings description is not a string: ${setting.id}`);
+		descriptions.push({ path: setting.id, ui, descriptor, source });
+	}
+	return descriptions;
+}
+
+function renderTemplate(template: string, values: Record<string, string>): string {
+	let result = template;
 	for (const [name, value] of Object.entries(values)) result = result.replaceAll(`{${name}}`, () => value);
 	return result;
 }
 
+function renderDictionaryTemplate(dictionary: Record<string, string>, key: string, values: Record<string, string>): string {
+	const translated = Object.hasOwn(dictionary, key) ? dictionary[key] : undefined;
+	if (typeof translated !== "string" || translated.length === 0) throw new Error(`Missing settings template translation: ${key}`);
+	return renderTemplate(translated, values);
+}
+
+// Static sources can still match the host's canonical key-hint template; preserve their literal hints.
+function captureTemplateValues(source: string, template: string): Record<string, string> | undefined {
+	const parts: string[] = [];
+	const names: string[] = [];
+	const placeholders = /\{([^{}]+)\}/g;
+	let templateOffset = 0;
+	for (const match of template.matchAll(placeholders)) {
+		const name = match[1];
+		if (name === undefined || match.index === undefined) return undefined;
+		parts.push(template.slice(templateOffset, match.index));
+		names.push(name);
+		templateOffset = match.index + match[0].length;
+	}
+	if (names.length === 0) return undefined;
+	parts.push(template.slice(templateOffset));
+	const first = parts[0];
+	if (first === undefined || !source.startsWith(first)) return undefined;
+	const captures: Record<string, string> = {};
+	let sourceOffset = first.length;
+	for (let index = 0; index < names.length; index++) {
+		const name = names[index];
+		const suffix = parts[index + 1];
+		if (name === undefined || suffix === undefined) return undefined;
+		let end: number;
+		if (suffix.length > 0) end = source.indexOf(suffix, sourceOffset);
+		else if (index === names.length - 1) end = source.length;
+		else return undefined;
+		if (end <= sourceOffset) return undefined;
+		const value = source.slice(sourceOffset, end);
+		if (Object.hasOwn(captures, name) && captures[name] !== value) return undefined;
+		captures[name] = value;
+		sourceOffset = end + suffix.length;
+	}
+	return sourceOffset === source.length ? captures : undefined;
+}
+
+function translatedSettingDescription(
+	description: RawSettingDescription,
+	templateKey: string | undefined,
+	captures: Record<string, string>,
+	dictionary: Record<string, string>,
+): string {
+	const source = readRawSettingDescription(description);
+	if (templateKey) {
+		if (description.descriptor?.get && source === renderTemplate(templateKey, captures)) {
+			return renderDictionaryTemplate(dictionary, templateKey, captures);
+		}
+		if (!description.descriptor?.get) {
+			const sourceCaptures = captureTemplateValues(source, templateKey);
+			if (sourceCaptures) return renderDictionaryTemplate(dictionary, templateKey, sourceCaptures);
+		}
+	}
+	const translated = Object.hasOwn(dictionary, source) ? dictionary[source] : undefined;
+	if (typeof translated === "string" && translated.length > 0) return translated;
+	if (description.descriptor?.get) {
+		throw new Error(`Unsupported real settings getter description source for ${description.path}: ${source}`);
+	}
+	if (templateKey) throw new Error(`Missing exact dictionary translation for static settings description ${description.path}: ${source}`);
+	return source;
+}
+
+// Canonical key-hint templates mirror the host's template-first description translation.
 const getterDescriptionTemplateKeys: Record<string, string> = {
 	"tui.codexResetFireworks": "Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until {escape}",
 	"tui.mouse": "Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
@@ -228,12 +322,31 @@ try {
 	await settingsModule.Settings.init({ cwd: root, agentDir: root, inMemory: true, readOnly: true });
 	const defs = await import(pathToFileURL(host.settingsDefsPath).href);
 	const theme = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-tui/theme/theme", host.packageDir)).href) as ThemeModule;
-	const keyHints = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-tui/key-hint-format", host.packageDir)).href) as KeyHintModule;
 	theme.initThemeSync("unicode");
 	const dark = settings.find(setting => setting.ui?.label === "Dark Theme");
-	const dynamic = settings.find(setting => setting.id === "tui.codexResetFireworks");
-	if (!dark || !dynamic || typeof dynamic.ui?.description !== "string") throw new Error("real settings registry is missing expected metadata");
-	const rawDynamicDescription = dynamic.ui.description;
+	if (!dark) throw new Error("real settings registry is missing Dark Theme metadata");
+	const rawSettingDescriptions = readRawSettingDescriptions(settings);
+	const hasGetterDescriptionTemplate = rawSettingDescriptions.some(
+		description => description.descriptor?.get && Object.hasOwn(getterDescriptionTemplateKeys, description.path),
+	);
+	const keyHints: KeyHintModule | undefined = hasGetterDescriptionTemplate
+		? (await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-tui/key-hint-format", host.packageDir)).href)) as KeyHintModule
+		: undefined;
+	// This path is static on the minimum host and getter-shaped on newer hosts.
+	if (!rawSettingDescriptions.some(description => description.path === "spelling.autocomplete")) {
+		throw new Error("The selected real settings host is missing spelling.autocomplete description metadata");
+	}
+	// Hosts with both newer settings must retain every current initialized-key description path.
+	const hasCurrentDescriptionSet =
+		rawSettingDescriptions.some(description => description.path === "composer.predictions") &&
+		rawSettingDescriptions.some(description => description.path === "retry.waitForUsageReset");
+	if (hasCurrentDescriptionSet) {
+		for (const path of Object.keys(getterDescriptionTemplateKeys)) {
+			if (!rawSettingDescriptions.some(description => description.path === path)) {
+				throw new Error(`Current settings host is missing initialized description metadata: ${path}`);
+			}
+		}
+	}
 	const loopGuard = settings.find(setting => setting.id === "model.loopGuard.enabled");
 	const searchEndpoint = settings.find(setting => setting.id === "searxng.endpoint");
 	if (!loopGuard || !searchEndpoint || typeof loopGuard.ui?.description !== "string" || typeof searchEndpoint.ui?.description !== "string") {
@@ -260,7 +373,9 @@ try {
 	const disabledLoad = await loader.loadExtensions([extensionPath], root);
 	deepStrictEqual(disabledLoad.errors, [], "ordinary process extension loading must succeed");
 	strictEqual(dark.ui?.label, "Dark Theme");
-	strictEqual(dynamic.ui?.description, rawDynamicDescription);
+	for (const description of rawSettingDescriptions) {
+		strictEqual(description.ui.description, description.source, `mismatched PID must preserve ${description.path} description`);
+	}
 	strictEqual(tuiGoal.description, goalDescription, "a mismatched PID must keep canonical slash descriptions in English");
 	process.env.OMP_ZH_PROCESS_ID = String(process.pid);
 	const translatedLoad = await loader.loadExtensions([extensionPath], root);
@@ -272,20 +387,28 @@ try {
 	let after: SettingsSurfaceHost | undefined;
 	for (const preset of ["ascii", "unicode", "nerd"] as const) {
 		theme.initThemeSync(preset);
-		const descriptionCaptures = {
+		// Use the selected host API for each initialized theme's key labels.
+		const descriptionCaptures: Record<string, string> = keyHints ? {
 			escape: keyHints.formatKeyHint("escape"),
 			shift: keyHints.formatKeyHint("shift"),
 			ctrlC: keyHints.formatKeyHint("ctrl+c"),
 			upDown: keyHints.formatKeyHints(["up", "down"]),
 			tab: keyHints.formatKeyHint("tab"),
 			right: keyHints.formatKeyHint("right"),
-		};
+		} : {};
 		const surface = ui.createSettingsHost();
 		ok(surface.entries.length > 0, "the real initialized settings host must produce entries");
-		for (const [path, templateKey] of Object.entries(getterDescriptionTemplateKeys)) {
-			const entry = surface.entries.find(candidate => candidate.path === path);
-			if (!entry || typeof entry.ui?.description !== "string") throw new Error(`Missing real settings description: ${path}`);
-			strictEqual(entry.ui.description, renderDictionaryTemplate(dictionary, templateKey, descriptionCaptures), `${preset} ${path} description`);
+		for (const description of rawSettingDescriptions) {
+			// These fixture settings are asserted through the real environment-note composition below.
+			if (description.path === loopGuard.id || description.path === searchEndpoint.id) continue;
+			const entry = surface.entries.find(candidate => candidate.path === description.path);
+			if (!entry || typeof entry.ui?.description !== "string") throw new Error(`Missing real settings description: ${description.path}`);
+			const templateKey: string | undefined = getterDescriptionTemplateKeys[description.path];
+			strictEqual(
+				entry.ui.description,
+				translatedSettingDescription(description, templateKey, descriptionCaptures, dictionary),
+				`${preset} ${description.path} description`,
+			);
 		}
 		const overrideEntry: SettingsSurfaceEntry | undefined = surface.entries.find(entry => entry.path === loopGuard.id);
 		const fallbackEntry: SettingsSurfaceEntry | undefined = surface.entries.find(entry => entry.path === searchEndpoint.id);
@@ -447,9 +570,6 @@ try {
 	strictEqual(notifications[0]?.type, "error");
 	ok(notifications[0]?.message.includes("Extension getCommands metadata is unavailable"));
 	for (const handler of sessionShutdownHandlers) handler({}, uiContext);
-	const translatedDynamic = after.entries.find(entry => entry.path === dynamic.id);
-	if (!translatedDynamic || typeof translatedDynamic.ui?.description !== "string") throw new Error("dynamic description must remain readable");
-	ok(!translatedDynamic.ui.description.startsWith("Celebrate unscheduled"), "dynamic getter output was not translated");
 	deepStrictEqual(settings.map(setting => ({ id: setting.id, default: setting.default, enumValues: setting.enumValues })), logicalBefore);
 	for (const [tab, array] of Object.entries(groupArrays)) strictEqual(defs.TAB_GROUPS[tab], array);
 	const themeIndex = appearanceGroupsBefore.indexOf("Theme");

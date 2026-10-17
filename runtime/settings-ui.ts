@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { reportDiagnostic } from "./diagnostics";
 
 type Dictionary = Readonly<Record<string, string>>;
-type DiagnosticReporter = (message: string) => void;
 
 interface EnvNoteTemplates {
 	fallback: string;
@@ -34,43 +34,6 @@ const TRANSLATED_ENV_NOTE_FUNCTION = [
 ].join("\n");
 
 const translationsByPath = new Map<string, EnvNoteTemplates>();
-const pendingDiagnostics: string[] = [];
-let diagnosticReporter: DiagnosticReporter | undefined;
-
-function reportDiagnostic(message: string): void {
-	if (!diagnosticReporter) {
-		pendingDiagnostics.push(message);
-		return;
-	}
-	try {
-		diagnosticReporter(message);
-	} catch {
-		pendingDiagnostics.push(message);
-	}
-}
-
-export function setSettingsUiTranslationDiagnosticReporter(reporter: DiagnosticReporter | undefined): void {
-	diagnosticReporter = reporter;
-	if (!reporter || pendingDiagnostics.length === 0) return;
-
-	const pendingCount = pendingDiagnostics.length;
-	let remaining = 0;
-	for (let index = 0; index < pendingCount; index++) {
-		const message = pendingDiagnostics[index];
-		if (message === undefined) continue;
-		try {
-			reporter(message);
-		} catch {
-			pendingDiagnostics[remaining] = message;
-			remaining++;
-		}
-	}
-	pendingDiagnostics.length = remaining;
-}
-
-export function reportSettingsUiTranslationDiagnostic(message: string): void {
-	reportDiagnostic(message);
-}
 
 function escapeRegex(source: string): string {
 	let escaped = "";
@@ -102,7 +65,7 @@ function createSettingsUiSource(source: string, templates: EnvNoteTemplates, pat
 	if (source.includes(ENV_NOTE_MARKER)) return source;
 	const start = source.indexOf(ENV_NOTE_BLOCK_SOURCE);
 	if (start === -1 || source.indexOf(ENV_NOTE_BLOCK_SOURCE, start + ENV_NOTE_BLOCK_SOURCE.length) !== -1) {
-		reportDiagnostic(`[zhomp] settings UI source shape unsupported; environment note translation skipped for ${path}`);
+		reportDiagnostic(`settings UI source shape unsupported; environment note translation skipped for ${path}`);
 		return source;
 	}
 	const helper = `const ${ENV_NOTE_MARKER}: Readonly<{ fallback: string; override: string }> = Object.freeze(${JSON.stringify(templates)});`;
@@ -114,7 +77,7 @@ function createSettingsUiSource(source: string, templates: EnvNoteTemplates, pat
 export function registerSettingsUiTranslation(settingsUiPath: string, dictionary: Dictionary): void {
 	try {
 		if (!isAbsolute(settingsUiPath)) {
-			reportDiagnostic("[zhomp] settings UI translation skipped; expected an absolute host module path");
+			reportDiagnostic("settings UI translation skipped; expected an absolute host module path");
 			return;
 		}
 		const templates = getEnvNoteTemplates(dictionary);
@@ -134,7 +97,7 @@ export function registerSettingsUiTranslation(settingsUiPath: string, dictionary
 					try {
 						source = readFileSync(path, "utf8");
 					} catch (error) {
-						reportDiagnostic(`[zhomp] settings UI translation skipped: ${error instanceof Error ? error.message : String(error)}`);
+						reportDiagnostic(`settings UI translation skipped: ${error instanceof Error ? error.message : String(error)}`);
 						return undefined;
 					}
 					const current = translationsByPath.get(key);
@@ -144,6 +107,6 @@ export function registerSettingsUiTranslation(settingsUiPath: string, dictionary
 			},
 		});
 	} catch (error) {
-		reportDiagnostic(`[zhomp] settings UI translation skipped: ${error instanceof Error ? error.message : String(error)}`);
+		reportDiagnostic(`settings UI translation skipped: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }

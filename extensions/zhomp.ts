@@ -17,14 +17,17 @@ interface InstalledHostModule {
 
 export type Dictionary = Readonly<Record<string, string>>;
 
-interface InstalledModelUiModule {
-	setModelTranslationDiagnosticReporter(reporter: ((message: string) => void) | undefined): void;
+interface InstalledDiagnosticsModule {
+	reportDiagnostic(message: string): void;
+	setDiagnosticReporter(reporter: ((message: string) => void) | undefined): void;
 }
 
-interface InstalledSettingsUiModule {
-	registerSettingsUiTranslation(settingsUiPath: string, dictionary: Dictionary): void;
-	setSettingsUiTranslationDiagnosticReporter(reporter: ((message: string) => void) | undefined): void;
-	reportSettingsUiTranslationDiagnostic(message: string): void;
+async function loadInstalledDiagnostics(configPath: string): Promise<InstalledDiagnosticsModule> {
+	const module: unknown = await import(pathToFileURL(join(dirname(configPath), "diagnostics.ts")).href);
+	if (!isRecord(module) || typeof module.reportDiagnostic !== "function" || typeof module.setDiagnosticReporter !== "function") {
+		throw new Error("Installed diagnostics module is unavailable; reinstall zhomp");
+	}
+	return module as unknown as InstalledDiagnosticsModule;
 }
 
 interface SettingDescriptionTemplate {
@@ -180,16 +183,6 @@ export interface TranslationHost {
 	tabGroups: unknown;
 }
 
-export interface TranslationCounts {
-	tabLabels: number;
-	groups: number;
-	labels: number;
-	descriptions: number;
-	warnings: number;
-	optionLabels: number;
-	optionDescriptions: number;
-	readonly total: number;
-}
 
 function isRecord(value: unknown): value is ObjectRecord {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -234,26 +227,26 @@ function translateText(dictionary: Dictionary, source: string): string {
 function loadDictionary(environment: Environment, defaultPath: string, report: DiagnosticReporter): Dictionary {
 	const dictionaryPath = environment.OMP_ZH_DICT || defaultPath;
 	if (!existsSync(dictionaryPath)) {
-		report(`[zhomp] dict.json 不存在: ${dictionaryPath}（跳过汉化）`);
+		report(`dict.json 不存在: ${dictionaryPath}（跳过汉化）`);
 		return {};
 	}
 	let text: string;
 	try {
 		text = readFileSync(dictionaryPath, "utf8");
 	} catch (error) {
-		report(`[zhomp] dict.json 读取失败: ${error instanceof Error ? error.message : String(error)}`);
+		report(`dict.json 读取失败: ${error instanceof Error ? error.message : String(error)}`);
 		return {};
 	}
 	let value: unknown;
 	try {
 		value = JSON.parse(text);
 	} catch (error) {
-		report(`[zhomp] dict.json 解析失败: ${error instanceof Error ? error.message : String(error)}`);
+		report(`dict.json 解析失败: ${error instanceof Error ? error.message : String(error)}`);
 		return {};
 	}
 	const dictionary = parseDictionary(value);
 	if (!dictionary) {
-		report("[zhomp] dict.json 根值非法（需要 JSON 对象，跳过汉化）");
+		report("dict.json 根值非法（需要 JSON 对象，跳过汉化）");
 		return {};
 	}
 	return dictionary;
@@ -284,26 +277,18 @@ function notifyUiError(context: unknown, message: string): boolean {
 	}
 }
 
-function createUiDiagnosticReporter(apiValue: unknown): DiagnosticReporter {
-	const pending: string[] = [];
-	let activeContext: unknown;
-	const report: DiagnosticReporter = (message, context) => {
-		if (context !== undefined) activeContext = context;
-		if (!notifyUiError(context ?? activeContext, message)) pending.push(message);
-	};
+function createUiDiagnosticReporter(apiValue: unknown, diagnostics: InstalledDiagnosticsModule): DiagnosticReporter {
 	registerExtensionEvent(apiValue, "session_start", (_event, context) => {
-		activeContext = context;
-		let remaining = 0;
-		for (let index = 0; index < pending.length; index++) {
-			const message = pending[index];
-			if (message !== undefined && !notifyUiError(context, message)) {
-				pending[remaining] = message;
-				remaining++;
-			}
+		if (!isRecord(context) || context.hasUI !== true) {
+			diagnostics.setDiagnosticReporter(undefined);
+			return;
 		}
-		pending.length = remaining;
+		diagnostics.setDiagnosticReporter(message => {
+			if (!notifyUiError(context, message)) throw new Error("Extension UI notification is unavailable");
+		});
 	});
-	return report;
+	registerExtensionEvent(apiValue, "session_shutdown", () => diagnostics.setDiagnosticReporter(undefined));
+	return message => diagnostics.reportDiagnostic(message);
 }
 
 interface LoadedHost extends TranslationHost {
@@ -340,26 +325,6 @@ async function loadHost(hostPackage: HostPackage): Promise<LoadedHost> {
 	};
 }
 
-interface ValidatedOption {
-	object: ObjectRecord;
-}
-
-interface ValidatedUi {
-	object: ObjectRecord;
-	tab: string;
-	options: "runtime" | ValidatedOption[] | undefined;
-}
-
-interface ValidatedSetting {
-	ui: ValidatedUi | undefined;
-}
-
-interface ValidatedHost {
-	settings: ValidatedSetting[];
-	tabMetadata: ObjectRecord;
-	tabGroups: Record<string, string[]>;
-}
-
 function invalidHost(message: string): never {
 	throw new Error(`Unsupported settings host shape: ${message}`);
 }
@@ -372,15 +337,119 @@ function isStringArray(value: unknown): value is string[] {
 	return isUnknownArray(value) && value.every(entry => typeof entry === "string");
 }
 
-function validateSetting(
+interface LiveGetterTranslation {
+	dictionary: Dictionary;
+}
+
+type TranslationChange =
+	| { kind: "property"; target: ObjectRecord; key: string; value: string }
+	| { kind: "group"; groups: string[]; index: number; value: string }
+	| {
+			kind: "install-getter";
+			target: ObjectRecord;
+			key: string;
+			enumerable: boolean | undefined;
+			setter: PropertyDescriptor["set"];
+			getter: (this: unknown) => unknown;
+			translation: LiveGetterTranslation;
+	  }
+	| { kind: "update-getter"; translation: LiveGetterTranslation; dictionary: Dictionary };
+
+const liveGetterTranslations = new WeakMap<() => unknown, LiveGetterTranslation>();
+
+
+function markPreparedField(preparedFields: WeakMap<object, Set<string>>, target: object, key: string): void {
+	let fields = preparedFields.get(target);
+	if (!fields) {
+		fields = new Set<string>();
+		preparedFields.set(target, fields);
+	}
+	fields.add(key);
+}
+
+function prepareMetadataField(
+	target: ObjectRecord,
+	key: string,
+	source: unknown,
+	dictionary: Dictionary,
+	changes: TranslationChange[],
+	preparedFields: WeakMap<object, Set<string>>,
+): void {
+	if (preparedFields.get(target)?.has(key)) return;
+	const descriptor = Object.getOwnPropertyDescriptor(target, key);
+	if (descriptor?.get) {
+		if (!descriptor.configurable) {
+			if (typeof source === "string" && translateMetadataText(dictionary, key, source) !== source) {
+				throw new Error(`Unsupported readonly settings metadata: ${key}`);
+			}
+			return;
+		}
+
+		const existingTranslation = liveGetterTranslations.get(descriptor.get);
+		if (existingTranslation) {
+			changes.push({ kind: "update-getter", translation: existingTranslation, dictionary });
+		} else {
+			const original = descriptor.get;
+			const translation = { dictionary };
+			const getter = function (this: unknown): unknown {
+				const current: unknown = original.call(this);
+				return typeof current === "string" ? translateMetadataText(translation.dictionary, key, current) : current;
+			};
+			changes.push({
+				kind: "install-getter",
+				target,
+				key,
+				enumerable: descriptor.enumerable,
+				setter: descriptor.set,
+				getter,
+				translation,
+			});
+		}
+		markPreparedField(preparedFields, target, key);
+		return;
+	}
+
+	if (typeof source !== "string") return;
+	const translated = translateMetadataText(dictionary, key, source);
+	if (translated === source) return;
+	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
+		throw new Error(`Unsupported readonly settings metadata: ${key}`);
+	}
+	changes.push({ kind: "property", target, key, value: translated });
+	markPreparedField(preparedFields, target, key);
+}
+
+function prepareGroup(
+	groups: string[],
+	index: number,
+	dictionary: Dictionary,
+	changes: TranslationChange[],
+	preparedFields: WeakMap<object, Set<string>>,
+): void {
+	const key = String(index);
+	if (preparedFields.get(groups)?.has(key)) return;
+	const source = groups[index];
+	const translated = translateText(dictionary, source);
+	if (translated === source) return;
+	if (!Object.getOwnPropertyDescriptor(groups, key)?.writable) {
+		throw new Error("Unsupported readonly settings metadata: TAB_GROUPS");
+	}
+	changes.push({ kind: "group", groups, index, value: translated });
+	markPreparedField(preparedFields, groups, key);
+}
+
+function prepareSetting(
 	value: unknown,
 	metadata: ObjectRecord,
-	groups: Record<string, string[]>,
+	tabGroups: Readonly<Record<string, string[]>>,
+	dictionary: Dictionary,
+	changes: TranslationChange[],
+	preparedFields: WeakMap<object, Set<string>>,
 	index: number,
-): ValidatedSetting {
+): void {
 	if (!isRecord(value) || typeof value.id !== "string") invalidHost(`setting ${index} has no string id`);
 	const rawUi = value.ui;
-	if (rawUi === undefined) return { ui: undefined };
+	if (rawUi === undefined) return;
 	if (!isRecord(rawUi)) invalidHost(`setting ${value.id} has an invalid ui object`);
 	const tab = rawUi.tab;
 	const label = rawUi.label;
@@ -389,11 +458,13 @@ function validateSetting(
 		invalidHost(`setting ${value.id} has incomplete ui metadata`);
 	}
 	if (!hasOwn(metadata, tab)) invalidHost(`setting ${value.id} references an unknown tab`);
+	const groups = tabGroups[tab];
+	if (!groups) invalidHost(`setting ${value.id} references an unknown tab`);
 	const group = rawUi.group;
 	if (group !== undefined && typeof group !== "string") {
 		invalidHost(`setting ${value.id} has a non-string group`);
 	}
-	if (typeof group === "string" && !groups[tab].includes(group)) {
+	if (typeof group === "string" && !groups.includes(group)) {
 		invalidHost(`setting ${value.id} references an unknown group`);
 	}
 	const warning = rawUi.warning;
@@ -401,30 +472,33 @@ function validateSetting(
 		invalidHost(`setting ${value.id} has a non-string warning`);
 	}
 	const rawOptions = rawUi.options;
-	let options: ValidatedUi["options"];
-	if (rawOptions === undefined) {
-		options = undefined;
-	} else if (rawOptions === "runtime") {
-		options = "runtime";
-	} else {
-		if (!isUnknownArray(rawOptions)) invalidHost(`setting ${value.id} has invalid options`);
-		const validatedOptions: ValidatedOption[] = [];
-		for (const [optionIndex, option] of rawOptions.entries()) {
-			if (!isRecord(option) || typeof option.value !== "string" || typeof option.label !== "string") {
-				invalidHost(`setting ${value.id} option ${optionIndex} has an invalid shape`);
-			}
-			if (option.description !== undefined && typeof option.description !== "string") {
-				invalidHost(`setting ${value.id} option ${optionIndex} has an invalid description`);
-			}
-			validatedOptions.push({ object: option });
-		}
-		options = validatedOptions;
+	if (rawOptions !== undefined && rawOptions !== "runtime" && !isUnknownArray(rawOptions)) {
+		invalidHost(`setting ${value.id} has invalid options`);
 	}
-	return { ui: { object: rawUi, tab, options } };
+
+	prepareMetadataField(rawUi, "label", label, dictionary, changes, preparedFields);
+	prepareMetadataField(rawUi, "description", description, dictionary, changes, preparedFields);
+	prepareMetadataField(rawUi, "warning", warning, dictionary, changes, preparedFields);
+	prepareMetadataField(rawUi, "group", group, dictionary, changes, preparedFields);
+	if (!Array.isArray(rawOptions)) return;
+	for (const [optionIndex, option] of rawOptions.entries()) {
+		if (!isRecord(option)) invalidHost(`setting ${value.id} option ${optionIndex} has an invalid shape`);
+		const optionValue = option.value;
+		const optionLabel = option.label;
+		if (typeof optionValue !== "string" || typeof optionLabel !== "string") {
+			invalidHost(`setting ${value.id} option ${optionIndex} has an invalid shape`);
+		}
+		const optionDescription = option.description;
+		if (optionDescription !== undefined && typeof optionDescription !== "string") {
+			invalidHost(`setting ${value.id} option ${optionIndex} has an invalid description`);
+		}
+		prepareMetadataField(option, "label", optionLabel, dictionary, changes, preparedFields);
+		prepareMetadataField(option, "description", optionDescription, dictionary, changes, preparedFields);
+	}
 }
 
-/** Validate every object that will be touched before making the first mutation. */
-function validateHost(host: TranslationHost): ValidatedHost {
+/** Prepare every host edit without mutating metadata or existing getter translations. */
+function prepareSettingsTranslation(host: TranslationHost, dictionary: Dictionary): TranslationChange[] {
 	if (!isRecord(host.tabMetadata)) invalidHost("TAB_METADATA must be an object");
 	if (!isRecord(host.tabGroups)) invalidHost("TAB_GROUPS must be an object");
 	const metadata = host.tabMetadata;
@@ -434,158 +508,62 @@ function validateHost(host: TranslationHost): ValidatedHost {
 	if (metadataKeys.length !== groupKeys.length || metadataKeys.some(key => !hasOwn(rawGroups, key))) {
 		invalidHost("TAB_METADATA and TAB_GROUPS must contain the same tabs");
 	}
-	const tabGroups: Record<string, string[]> = {};
+
+	const changes: TranslationChange[] = [];
+	const preparedFields = new WeakMap<object, Set<string>>();
+	const tabGroups = Object.create(null) as Record<string, string[]>;
 	for (const key of metadataKeys) {
 		const tab = metadata[key];
-		if (!isRecord(tab) || typeof tab.label !== "string" || typeof tab.icon !== "string") {
+		if (!isRecord(tab)) invalidHost(`TAB_METADATA.${key} has an invalid shape`);
+		const label = tab.label;
+		const icon = tab.icon;
+		if (typeof label !== "string" || typeof icon !== "string") {
 			invalidHost(`TAB_METADATA.${key} has an invalid shape`);
 		}
+		prepareMetadataField(tab, "label", label, dictionary, changes, preparedFields);
 		const groups = rawGroups[key];
 		if (!isStringArray(groups)) invalidHost(`TAB_GROUPS.${key} must be a string array`);
-		tabGroups[key] = groups;
-	}
-	if (!isOrderedSettings(host.orderedSettings)) invalidHost("orderedSettings must be a function");
-	const orderedSettings = host.orderedSettings();
-	if (!Array.isArray(orderedSettings)) invalidHost("orderedSettings must return an array");
-	const settings = orderedSettings.map((setting, index) => validateSetting(setting, metadata, tabGroups, index));
-	return { settings, tabMetadata: metadata, tabGroups };
-}
-
-interface LiveGetterTranslation {
-	dictionary: Dictionary;
-}
-
-const liveGetterTranslations = new WeakMap<() => unknown, LiveGetterTranslation>();
-
-/** Reject unsupported readonly metadata before the first in-place update. */
-function assertTranslatable(target: ObjectRecord, key: string, dictionary: Dictionary): void {
-	const descriptor = Object.getOwnPropertyDescriptor(target, key);
-	if (descriptor?.get && descriptor.configurable) return;
-	const source = target[key];
-	if (typeof source !== "string" || translateMetadataText(dictionary, key, source) === source) return;
-	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
-		throw new Error(`Unsupported readonly settings metadata: ${key}`);
-	}
-}
-
-function increment(target: ObjectRecord, key: string, dictionary: Dictionary, count: () => void): void {
-	const descriptor = Object.getOwnPropertyDescriptor(target, key);
-	if (descriptor?.get) {
-		if (!descriptor.configurable) return;
-		const existingTranslation = liveGetterTranslations.get(descriptor.get);
-		if (existingTranslation) {
-			existingTranslation.dictionary = dictionary;
-			return;
+		Object.defineProperty(tabGroups, key, { value: groups, enumerable: true });
+		for (let index = 0; index < groups.length; index++) {
+			prepareGroup(groups, index, dictionary, changes, preparedFields);
 		}
-
-		const original = descriptor.get;
-		const translation = { dictionary };
-		const source: unknown = original.call(target);
-		const translated = typeof source === "string" ? translateMetadataText(dictionary, key, source) : source;
-		const getter = function (this: unknown): unknown {
-			const current: unknown = original.call(this);
-			return typeof current === "string" ? translateMetadataText(translation.dictionary, key, current) : current;
-		};
-		Object.defineProperty(target, key, {
-			configurable: true,
-			enumerable: descriptor.enumerable,
-			get: getter,
-			set: descriptor.set,
-		});
-		liveGetterTranslations.set(getter, translation);
-		if (typeof source === "string" && translated !== source) count();
-		return;
 	}
 
-	const source = target[key];
-	if (typeof source !== "string") return;
-	const translated = translateMetadataText(dictionary, key, source);
-	if (translated === source) return;
-	if (!descriptor || !("value" in descriptor) || !descriptor.writable) {
-		throw new Error(`Unsupported readonly settings metadata: ${key}`);
+	const orderedSettings = host.orderedSettings;
+	if (!isOrderedSettings(orderedSettings)) invalidHost("orderedSettings must be a function");
+	const settings = orderedSettings();
+	if (!Array.isArray(settings)) invalidHost("orderedSettings must return an array");
+	for (const [index, setting] of settings.entries()) {
+		prepareSetting(setting, metadata, tabGroups, dictionary, changes, preparedFields, index);
 	}
-	target[key] = translated;
-	count();
-}
-
-function makeCounts(): Omit<TranslationCounts, "total"> & { total: number } {
-	return {
-		tabLabels: 0,
-		groups: 0,
-		labels: 0,
-		descriptions: 0,
-		warnings: 0,
-		optionLabels: 0,
-		optionDescriptions: 0,
-		total: 0,
-	};
+	return changes;
 }
 
 /** Translate the live host metadata in place; this is the public integration boundary. */
-export function translateSettings(host: TranslationHost, dictionary: Dictionary): TranslationCounts {
-	const validated = validateHost(host);
-	const counts = makeCounts();
-	// Validate every field first so a future readonly UI shape cannot leave
-	// translated tab/group names paired with untranslated setting metadata.
-	for (const tab of Object.values(validated.tabMetadata)) {
-		if (isRecord(tab)) assertTranslatable(tab, "label", dictionary);
-	}
-	for (const groups of Object.values(validated.tabGroups)) {
-		for (let index = 0; index < groups.length; index++) {
-			if (translateText(dictionary, groups[index]) !== groups[index] && !Object.getOwnPropertyDescriptor(groups, String(index))?.writable) {
-				throw new Error("Unsupported readonly settings metadata: TAB_GROUPS");
-			}
+export function translateSettings(host: TranslationHost, dictionary: Dictionary): void {
+	const changes = prepareSettingsTranslation(host, dictionary);
+	for (const change of changes) {
+		switch (change.kind) {
+			case "property":
+				change.target[change.key] = change.value;
+				break;
+			case "group":
+				change.groups[change.index] = change.value;
+				break;
+			case "install-getter":
+				Object.defineProperty(change.target, change.key, {
+					configurable: true,
+					enumerable: change.enumerable,
+					get: change.getter,
+					set: change.setter,
+				});
+				liveGetterTranslations.set(change.getter, change.translation);
+				break;
+			case "update-getter":
+				change.translation.dictionary = change.dictionary;
+				break;
 		}
 	}
-	for (const setting of validated.settings) {
-		const ui = setting.ui;
-		if (!ui) continue;
-		for (const field of ["label", "description", "warning", "group"]) assertTranslatable(ui.object, field, dictionary);
-		if (Array.isArray(ui.options)) {
-			for (const option of ui.options) {
-				assertTranslatable(option.object, "label", dictionary);
-				assertTranslatable(option.object, "description", dictionary);
-			}
-		}
-	}
-	for (const key of Object.keys(validated.tabMetadata)) {
-		const tab = validated.tabMetadata[key];
-		if (!isRecord(tab)) invalidHost(`TAB_METADATA.${key} became invalid during translation`);
-		increment(tab, "label", dictionary, () => counts.tabLabels++);
-	}
-	for (const groups of Object.values(validated.tabGroups)) {
-		for (let index = 0; index < groups.length; index++) {
-			const source = groups[index];
-			const translated = translateText(dictionary, source);
-			if (translated !== source) {
-				groups[index] = translated;
-				counts.groups++;
-			}
-		}
-	}
-	for (const setting of validated.settings) {
-		const ui = setting.ui;
-		if (!ui) continue;
-		increment(ui.object, "label", dictionary, () => counts.labels++);
-		increment(ui.object, "description", dictionary, () => counts.descriptions++);
-		increment(ui.object, "warning", dictionary, () => counts.warnings++);
-		increment(ui.object, "group", dictionary, () => counts.groups++);
-		if (Array.isArray(ui.options)) {
-			for (const option of ui.options) {
-				increment(option.object, "label", dictionary, () => counts.optionLabels++);
-				increment(option.object, "description", dictionary, () => counts.optionDescriptions++);
-			}
-		}
-	}
-	counts.total =
-		counts.tabLabels +
-		counts.groups +
-		counts.labels +
-		counts.descriptions +
-		counts.warnings +
-		counts.optionLabels +
-		counts.optionDescriptions;
-	return counts;
 }
 
 
@@ -1027,7 +1005,7 @@ function registerSlashAutocomplete(
 				if (!isRecord(ui) || registered) return;
 				const addAutocompleteProvider = Reflect.get(ui, "addAutocompleteProvider", ui);
 				if (typeof addAutocompleteProvider !== "function") {
-					report("[zhomp] slash autocomplete 显示层跳过: UI provider registration is unavailable", context);
+					report("slash autocomplete 显示层跳过: UI provider registration is unavailable", context);
 					return;
 				}
 				const factory = function (current: unknown): unknown {
@@ -1035,19 +1013,19 @@ function registerSlashAutocomplete(
 						const blockedNames = readBlockedSlashCommandNames(extensionApi);
 						return wrapSlashAutocompleteWithIndex(current, index, dictionary, blockedNames);
 					} catch (error) {
-						report(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
+						report(`slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
 						return current;
 					}
 				};
 				Reflect.apply(addAutocompleteProvider, ui, [factory]);
 				registered = true;
 			} catch (error) {
-				report(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`, context);
+				report(`slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`, context);
 			}
 		};
 		registerExtensionEvent(apiValue, "session_start", onSessionStart);
 	} catch (error) {
-		report(`[zhomp] slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
+		report(`slash autocomplete 显示层跳过: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
@@ -1059,20 +1037,15 @@ export function isTranslationEnabled(environment: Environment = process.env): bo
 /** Register display transforms before the host CLI imports their consumers. */
 export async function preparePreloadDisplayTranslations(launchConfig: LaunchConfig, configPath: string): Promise<void> {
 	if (!isTranslationEnabled()) return;
-	let reportDiagnostic: (message: string) => void = message => console.error(message);
+	const diagnostics = await loadInstalledDiagnostics(configPath);
 	try {
+		const dictionary = loadDictionary(process.env, launchConfig.dictPath, diagnostics.reportDiagnostic);
+		if (Object.keys(dictionary).length === 0) return;
 		const settingsUiPath = join(dirname(configPath), "settings-ui.ts");
-		const settingsUiModule: unknown = await import(pathToFileURL(settingsUiPath).href);
-		if (!isRecord(settingsUiModule) ||
-			typeof settingsUiModule.registerSettingsUiTranslation !== "function" ||
-			typeof settingsUiModule.setSettingsUiTranslationDiagnosticReporter !== "function" ||
-			typeof settingsUiModule.reportSettingsUiTranslationDiagnostic !== "function") {
+		const settingsUi: unknown = await import(pathToFileURL(settingsUiPath).href);
+		if (!isRecord(settingsUi) || typeof settingsUi.registerSettingsUiTranslation !== "function") {
 			throw new Error("Installed settings UI translation module is unavailable; reinstall zhomp");
 		}
-		const settingsUi = settingsUiModule as unknown as InstalledSettingsUiModule;
-		reportDiagnostic = message => settingsUi.reportSettingsUiTranslationDiagnostic(message);
-		const dictionary = loadDictionary(process.env, launchConfig.dictPath, reportDiagnostic);
-		if (Object.keys(dictionary).length === 0) return;
 		const modelUiPath = join(dirname(configPath), "model-ui.ts");
 		const modelUi: unknown = await import(pathToFileURL(modelUiPath).href);
 		if (!isRecord(modelUi) || typeof modelUi.registerModelTranslation !== "function") {
@@ -1081,30 +1054,20 @@ export async function preparePreloadDisplayTranslations(launchConfig: LaunchConf
 		modelUi.registerModelTranslation(launchConfig.host.modelHubPath, dictionary);
 		settingsUi.registerSettingsUiTranslation(launchConfig.host.settingsUiPath, dictionary);
 	} catch (error) {
-		reportDiagnostic(`[zhomp] 汉化预加载跳过: ${error instanceof Error ? error.message : String(error)}`);
+		diagnostics.reportDiagnostic(`汉化预加载跳过: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
 export default async function (_pi: unknown): Promise<void> {
 	if (!isTranslationEnabled()) return;
-	const report = createUiDiagnosticReporter(_pi);
+	const environment = process.env;
+	const configPath = environment.OMP_ZH_CONFIG;
+	if (!configPath || !isAbsolute(configPath)) {
+		throw new Error("OMP_ZH_CONFIG must be an absolute launch config path");
+	}
+	const diagnostics = await loadInstalledDiagnostics(configPath);
+	const report = createUiDiagnosticReporter(_pi, diagnostics);
 	try {
-		const environment = process.env;
-		const configPath = environment.OMP_ZH_CONFIG;
-		if (!configPath || !isAbsolute(configPath)) {
-			throw new Error("OMP_ZH_CONFIG must be an absolute launch config path");
-		}
-		// This module path belongs to the runtime-selected installation, not this source tree.
-		const modelUiPath = join(dirname(configPath), "model-ui.ts");
-		const modelUi = await import(pathToFileURL(modelUiPath).href) as InstalledModelUiModule;
-		modelUi.setModelTranslationDiagnosticReporter(message => report(`[zhomp] ${message}`));
-		const settingsUiPath = join(dirname(configPath), "settings-ui.ts");
-		const settingsUi = await import(pathToFileURL(settingsUiPath).href) as InstalledSettingsUiModule;
-		settingsUi.setSettingsUiTranslationDiagnosticReporter(message => report(`[zhomp] ${message}`));
-		registerExtensionEvent(_pi, "session_shutdown", () => {
-			modelUi.setModelTranslationDiagnosticReporter(undefined);
-			settingsUi.setSettingsUiTranslationDiagnosticReporter(undefined);
-		});
 		// The installed host module is selected at runtime by the launcher's config path.
 		const hostModulePath = join(dirname(configPath), "host.ts");
 		const hostModule = await import(pathToFileURL(hostModulePath).href) as InstalledHostModule;
@@ -1115,6 +1078,6 @@ export default async function (_pi: unknown): Promise<void> {
 		translateSettings(host, dictionary);
 		registerSlashAutocomplete(_pi, host.builtinSlashCommandDefs, dictionary, report);
 	} catch (error) {
-		report(`[zhomp] 汉化失败: ${error instanceof Error ? error.message : String(error)}`);
+		report(`汉化失败: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }

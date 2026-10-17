@@ -79,7 +79,7 @@ describe("translation boundary", () => {
 		const secondOptionObject = optionList[1];
 		const optionValues = optionList.map(option => option.value);
 
-		const counts = translateSettings(host, {
+		translateSettings(host, {
 			Appearance: "外观",
 			General: "通用",
 			Theme: "主题",
@@ -91,7 +91,6 @@ describe("translation boundary", () => {
 			"Light theme": "浅色主题",
 		});
 
-		strictEqual(counts.total, 10);
 		strictEqual(tab.appearance, tabObject);
 		strictEqual(setting.ui, uiObject);
 		strictEqual(setting.enumValues, enumValues);
@@ -119,14 +118,12 @@ describe("translation boundary", () => {
 	test("keeps a shared group name consistent and is idempotent", () => {
 		const { host, setting, groupList } = createFixture();
 		const dictionary = { General: "通用", Theme: "主题", "Choose a theme": "选择主题" };
-		const first = translateSettings(host, dictionary);
+		translateSettings(host, dictionary);
 		const translatedGroups = host.tabGroups as { appearance: string[] };
-		strictEqual(first.groups, 2);
 		strictEqual(translatedGroups.appearance, groupList);
 		strictEqual(translatedGroups.appearance[0], "通用");
 		strictEqual(setting.ui.group, "通用");
-		const second = translateSettings(host, dictionary);
-		strictEqual(second.total, 0);
+		translateSettings(host, dictionary);
 		strictEqual(setting.ui.label, "主题");
 	});
 
@@ -181,7 +178,7 @@ describe("translation boundary", () => {
 		strictEqual(setting.ui.description, "按 Esc 取消");
 		shortcut = "Ctrl+C";
 		strictEqual(setting.ui.description, "按 Ctrl+C 取消");
-		strictEqual(translateSettings(host, dict).total, 0);
+		translateSettings(host, dict);
 		const locked = createFixture();
 		Object.defineProperty(locked.setting.ui, "description", { value: "Choose a theme", configurable: false, writable: false });
 		throws(() => translateSettings(locked.host, { Appearance: "外观", General: "通用", "Choose a theme": "选择主题" }));
@@ -193,14 +190,60 @@ describe("translation boundary", () => {
 		strictEqual(locked.groupList[0], "General");
 		strictEqual(groupList[0], "通用");
 	});
-	test("keeps a configurable getter live after an initial dictionary miss", () => {
+	test("does not update a wrapped getter dictionary when later metadata is invalid", () => {
 		const { host, setting } = createFixture();
-		let description = "Unlisted";
-		const getter = (): string => description;
+		let description = "Press Esc to cancel";
 		Object.defineProperty(setting.ui, "description", {
 			configurable: true,
 			enumerable: true,
+			get() { return description; },
+		});
+		const firstDictionary = {
+			Appearance: "外观",
+			General: "通用",
+			Theme: "主题",
+			"Press Esc to cancel": "按 Esc 取消",
+		};
+		translateSettings(host, firstDictionary);
+		const installedGetter = Object.getOwnPropertyDescriptor(setting.ui, "description")?.get;
+
+		const lateUi = { tab: "appearance", group: "通用", label: "Locked", description: "Choose a theme" };
+		Object.defineProperty(lateUi, "description", {
+			configurable: false,
+			enumerable: true,
+			value: "Choose a theme",
+			writable: false,
+		});
+		const invalidHost: TranslationHost = {
+			...host,
+			orderedSettings: () => [setting, { id: "appearance.locked", ui: lateUi }],
+		};
+		throws(() => translateSettings(invalidHost, {
+			"外观": "第二外观",
+			"通用": "第二组",
+			"主题": "第二主题",
+			"Press Esc to cancel": "第二次翻译",
+			"Choose a theme": "锁定设置",
+		}));
+
+		strictEqual(setting.ui.description, "按 Esc 取消");
+		strictEqual(Object.getOwnPropertyDescriptor(setting.ui, "description")?.get, installedGetter);
+	});
+
+	test("keeps a configurable getter live after an initial dictionary miss", () => {
+		const { host, setting } = createFixture();
+		let description = "Unlisted";
+		const getter = function (this: { source?: string }): string {
+			return this.source ?? description;
+		};
+		const setter = function (value: string): void {
+			description = value;
+		};
+		Object.defineProperty(setting.ui, "description", {
+			configurable: true,
+			enumerable: false,
 			get: getter,
+			set: setter,
 		});
 		const dictionary = {
 			Appearance: "外观",
@@ -209,15 +252,19 @@ describe("translation boundary", () => {
 		};
 
 		translateSettings(host, dictionary);
-		const installedGetter = Object.getOwnPropertyDescriptor(setting.ui, "description")?.get;
+		const installedDescriptor = Object.getOwnPropertyDescriptor(setting.ui, "description");
+		const installedGetter = installedDescriptor?.get;
 		notStrictEqual(installedGetter, getter);
+		strictEqual(installedDescriptor?.set, setter);
+		strictEqual(installedDescriptor?.enumerable, false);
+		strictEqual(installedGetter?.call({ source: "Press Esc to cancel" }), "按 Esc 取消");
 		strictEqual(setting.ui.description, "Unlisted");
 
 		translateSettings(host, dictionary);
 		strictEqual(Object.getOwnPropertyDescriptor(setting.ui, "description")?.get, installedGetter);
-		description = "Press Esc to cancel";
+		setting.ui.description = "Press Esc to cancel";
 		strictEqual(setting.ui.description, "按 Esc 取消");
-		description = "Unlisted";
+		setting.ui.description = "Unlisted";
 		strictEqual(setting.ui.description, "Unlisted");
 	});
 });

@@ -9,7 +9,7 @@
 		"type": "git",
 		"url": "https://github.com/vanness30214/zhomp.git"
 	},
-	"files": ["extensions", "dict", "runtime", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.sh", "scripts/install.ps1", "scripts/uninstall.sh", "scripts/uninstall.ps1", "README.md", "INSTALL.md", "CHANGELOG.md"],
+	"files": ["extensions", "dict", "runtime", "install-manifest.tsv", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.sh", "scripts/install.ps1", "scripts/uninstall.sh", "scripts/uninstall.ps1", "README.md", "INSTALL.md", "CHANGELOG.md"],
 	"omp": {
 		"extensions": ["extensions/zhomp.ts"]
 	},

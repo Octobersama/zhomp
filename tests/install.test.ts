@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert";
 import { test } from "bun:test";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { renameSync, readFileSync, mkdirSync, existsSync, rmSync, symlinkSync } from "node:fs";
+import { renameSync, readFileSync, realpathSync, mkdirSync, existsSync, rmSync, symlinkSync } from "node:fs";
 import { discoverPackage, HostNotFoundError, install, publishArtifacts, resolveHome } from "../scripts/install-core";
 import { readLaunchConfig, readSupportPolicy, validatePackage } from "../runtime/host";
 import { createHostFixture, makeTempDir, removeTree, runCommand, snapshotTree, writeText } from "./verification-fixtures";
@@ -19,7 +19,7 @@ test("installation rejects older hosts but accepts compatible updates", () => {
 		for (const newer of [minimumVersion, "18.4.1"]) {
 			const host = createHostFixture(join(root, newer), newer);
 			const result = install(repoDir, { OMP_ZH_HOME: join(root, `home-${newer}`), OMP_ZH_PACKAGE_DIR: host });
-			strictEqual(result.packageDir, resolve(host));
+			strictEqual(realpathSync(result.packageDir), realpathSync(host));
 		}
 		const broken = createHostFixture(join(root, "broken"), "18.4.1");
 		rmSync(join(broken, "src", "config", "all-settings.ts"));
@@ -51,7 +51,7 @@ test("host settings paths follow the selected package's exported definitions lay
 			exports: { "./overlays/settings-defs": "./src/relocated/custom-settings.ts", "./*": "./src/*.ts" },
 		}));
 		const validated = validatePackage(packageDir, range);
-		strictEqual(validated.settingsDefsPath, resolve(redirectedDefs));
+		strictEqual(realpathSync(validated.settingsDefsPath), realpathSync(redirectedDefs));
 		for (const path of [validated.cliPath, validated.allSettingsPath, validated.settingsUiPath, validated.settingsDefsPath, validated.cliCommandsPath, validated.cliArgsPath, validated.modelHubPath]) {
 			strictEqual(isAbsolute(path), true, path);
 		}
@@ -60,7 +60,7 @@ test("host settings paths follow the selected package's exported definitions lay
 		const configPath = join(root, "launch.json");
 		writeText(configPath, JSON.stringify({ packageDir, supportedRange: range, extensionPath, dictPath }));
 		const config = readLaunchConfig(configPath);
-		strictEqual(config.host.settingsDefsPath, resolve(redirectedDefs));
+		strictEqual(realpathSync(config.host.settingsDefsPath), realpathSync(redirectedDefs));
 	} finally { removeTree(root); }
 });
 
@@ -68,8 +68,8 @@ test("explicit and independently configured global directories select the actual
 	const root = makeTempDir("zhomp-discovery");
 	try {
 		const host = createHostFixture(root, minimumVersion);
-		strictEqual(discoverPackage(range, { OMP_ZH_PACKAGE_DIR: host }).packageDir, resolve(host));
-		strictEqual(discoverPackage(range, { BUN_INSTALL_GLOBAL_DIR: root, BUN_INSTALL_BIN: join(root, "unrelated-bin") }).packageDir, resolve(host));
+		strictEqual(realpathSync(discoverPackage(range, { OMP_ZH_PACKAGE_DIR: host }).packageDir), realpathSync(host));
+		strictEqual(realpathSync(discoverPackage(range, { BUN_INSTALL_GLOBAL_DIR: root, BUN_INSTALL_BIN: join(root, "unrelated-bin") }).packageDir), realpathSync(host));
 		let explicitError: unknown;
 		try {
 			discoverPackage(range, { OMP_ZH_PACKAGE_DIR: join(root, "missing"), BUN_INSTALL_GLOBAL_DIR: root });
@@ -83,19 +83,19 @@ test("explicit and independently configured global directories select the actual
 		throws(() => discoverPackage(range, { USERPROFILE: malformedUser, HOME: malformedUser }));
 		const user = join(root, "user");
 		writeText(join(user, ".bunfig.toml"), `[install]\nglobalDir = ${JSON.stringify(root.replaceAll("\\", "/"))}\nglobalBinDir = ${JSON.stringify(join(root, "elsewhere").replaceAll("\\", "/"))}\n`);
-		strictEqual(discoverPackage(range, { USERPROFILE: user, HOME: user }).packageDir, resolve(host));
+		strictEqual(realpathSync(discoverPackage(range, { USERPROFILE: user, HOME: user }).packageDir), realpathSync(host));
 		const defaultHome = join(root, "default-user");
 		const defaultHost = createHostFixture(join(defaultHome, ".bun", "install", "global"), minimumVersion);
-		strictEqual(discoverPackage(range, { USERPROFILE: defaultHome, HOME: defaultHome }).packageDir, resolve(defaultHost));
+		strictEqual(realpathSync(discoverPackage(range, { USERPROFILE: defaultHome, HOME: defaultHome }).packageDir), realpathSync(defaultHost));
 		const customUser = join(root, "custom-user");
 		const customGlobal = join(root, "custom-global");
 		const configuredHost = createHostFixture(customGlobal, minimumVersion);
 		createHostFixture(join(customUser, ".bun", "install", "global"), "18.4.1");
 		writeText(join(customUser, ".bunfig.toml"), `[install]\nglobalDir = ${JSON.stringify(customGlobal.replaceAll("\\", "/"))}\nglobalBinDir = ${JSON.stringify(join(customUser, "separate-bin").replaceAll("\\", "/"))}\n`);
 		const configuredEnv = { USERPROFILE: customUser, HOME: customUser };
-		strictEqual(discoverPackage(range, configuredEnv).packageDir, resolve(configuredHost));
+		strictEqual(realpathSync(discoverPackage(range, configuredEnv).packageDir), realpathSync(configuredHost));
 		const installed = install(repoDir, { ...configuredEnv, OMP_ZH_HOME: join(root, "custom-home") });
-		strictEqual(installed.packageDir, resolve(configuredHost));
+		strictEqual(realpathSync(installed.packageDir), realpathSync(configuredHost));
 		rmSync(join(host, "src", "cli.ts"));
 		throws(() => validatePackage(host, range));
 	} finally { removeTree(root); }
@@ -214,18 +214,25 @@ test("installed launcher follows host parser semantics and clears inherited runt
 				bootstrapCwd: string | undefined;
 				launcherParentPid: string | undefined;
 			};
-			strictEqual(output.cwd, project);
-			strictEqual(output.config, configPath);
+			strictEqual(realpathSync(output.cwd), realpathSync(project));
+			strictEqual(output.config === undefined ? undefined : realpathSync(output.config), realpathSync(configPath));
 			strictEqual(output.enabled, "1");
 			strictEqual(output.pidMatches, true);
-			strictEqual(output.dict, join(project, "custom-dict.json"));
+			strictEqual(output.dict === undefined ? undefined : realpathSync(output.dict), realpathSync(join(project, "custom-dict.json")));
 			strictEqual(output.packageDir, undefined);
 			strictEqual(output.tuiPackageDir, undefined);
 			strictEqual(output.supportedRange, undefined);
 			strictEqual(output.bootstrapCwd, undefined);
 			strictEqual(output.launcherParentPid, undefined);
-			const expectedArgs = scenario.injectExtension ? ["--extension", extensionPath, ...scenario.args] : scenario.args;
-			deepStrictEqual(output.args, expectedArgs);
+			if (scenario.injectExtension) {
+				strictEqual(output.args[0], "--extension");
+				const actualExtension = output.args[1];
+				if (actualExtension === undefined) throw new Error("The launcher did not inject the extension path.");
+				strictEqual(realpathSync(actualExtension), realpathSync(extensionPath));
+				deepStrictEqual(output.args.slice(2), scenario.args);
+			} else {
+				deepStrictEqual(output.args, scenario.args);
+			}
 		}
 	} finally { removeTree(root); }
 }, 120_000);
@@ -237,9 +244,7 @@ test("successful reinstall is idempotent and preserves caller files", () => {
 		const env = { OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: host, OMP_ZH_INSTALL_SHELL: "bash" };
 		writeText(join(home, ".omp", "zh", "user.txt"), "keep");
 		const first = install(repoDir, env);
-		const settingsUiPath = join(home, ".omp", "zh", "settings-ui.ts");
-		strictEqual(first.paths.includes(settingsUiPath), true);
-		strictEqual(readFileSync(settingsUiPath, "utf8"), readFileSync(join(repoDir, "runtime", "settings-ui.ts"), "utf8"));
+		for (const path of first.paths) strictEqual(existsSync(path), true, `manifest artifact was not installed: ${path}`);
 		const before = snapshotTree(home);
 		const second = install(repoDir, env);
 		deepStrictEqual(second.paths, first.paths);

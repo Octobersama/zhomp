@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, test } from "bun:test";
+import { beforeAll, describe, test } from "bun:test";
 import { discoverPackage } from "../scripts/install-core";
 import { readSupportPolicy } from "../runtime/host";
 import { wrapSlashCommandAutocomplete } from "../extensions/zhomp";
@@ -321,6 +321,9 @@ async function loadFixedHostCommands(): Promise<SlashCommand[]> {
 	];
 }
 
+// Cold host imports include native bindings; keep setup outside the 5s behavior-test deadline.
+beforeAll(async () => { await loadHostAutocomplete(); }, 30000);
+
 describe("builtin slash description translation", () => {
 	test("covers every static description read from the selected host registry", async () => {
 		const { registry } = await loadHostAutocomplete();
@@ -340,8 +343,8 @@ describe("builtin slash description translation", () => {
 		const { registry, autocomplete } = await loadHostAutocomplete();
 		const provider = new autocomplete.CombinedAutocompleteProvider([...registry.BUILTIN_SLASH_COMMANDS], repoDir);
 		const wrapped = wrapProvider(provider, registry.BUILTIN_SLASH_COMMAND_DEFS);
-		const base = resultOrThrow(provider.trySyncSlashCompletion("/"), "the builtin command list");
-		const translated = resultOrThrow(wrapped.trySyncSlashCompletion("/"), "the wrapped builtin command list");
+		const base = resultOrThrow(await provider.getSuggestions(["/"], 0, 1), "the builtin command list");
+		const translated = resultOrThrow(await wrapped.getSuggestions(["/"], 0, 1), "the wrapped builtin command list");
 		assertSameSelection(base, translated);
 		for (const baseRow of base.items) {
 			const definition = registry.BUILTIN_SLASH_COMMAND_DEFS.find(command => command.name === baseRow.value);
@@ -501,8 +504,8 @@ describe("builtin slash description translation", () => {
 			repoDir,
 		);
 		const unknownWrapped = wrapProvider(unknownProvider, definitions);
-		const baseUnknown = resultOrThrow(unknownProvider.trySyncSlashCompletion("/"), "custom /init description");
-		const translatedUnknown = resultOrThrow(unknownWrapped.trySyncSlashCompletion("/"), "wrapped custom /init description");
+		const baseUnknown = resultOrThrow(unknownProvider.trySyncSlashCompletion("/init"), "custom /init description");
+		const translatedUnknown = resultOrThrow(unknownWrapped.trySyncSlashCompletion("/init"), "wrapped custom /init description");
 		assertSameSelection(baseUnknown, translatedUnknown);
 		strictEqual(rowOrThrow(translatedUnknown, "init", "custom /init").description, unknownDescription);
 
@@ -511,8 +514,8 @@ describe("builtin slash description translation", () => {
 			repoDir,
 		);
 		const hintedWrapped = wrapProvider(hintedProvider, definitions);
-		const baseHinted = resultOrThrow(hintedProvider.trySyncSlashCompletion("/"), "host argument-hint /init");
-		const translatedHinted = resultOrThrow(hintedWrapped.trySyncSlashCompletion("/"), "wrapped host argument-hint /init");
+		const baseHinted = resultOrThrow(hintedProvider.trySyncSlashCompletion("/init"), "host argument-hint /init");
+		const translatedHinted = resultOrThrow(hintedWrapped.trySyncSlashCompletion("/init"), "wrapped host argument-hint /init");
 		assertSameSelection(baseHinted, translatedHinted);
 		strictEqual(rowOrThrow(baseHinted, "init", "host argument-hint /init").description, `${argumentHint} - ${canonical}`);
 		strictEqual(
@@ -541,8 +544,13 @@ describe("builtin slash description translation", () => {
 		const translatedRow = rowOrThrow(translated, "model", "wrapped /model live state");
 		strictEqual(baseRow.description, "Model: test-provider/test-model");
 		strictEqual(translatedRow.description, baseRow.description, "dynamic provider/id text remains canonical");
-		strictEqual(translatedRow.nativeDetail, dictionary["Switch model for this session"]);
-		strictEqual(translatedRow.state, "test-provider/test-model");
+		if (baseRow.nativeDetail === undefined) {
+			strictEqual(translatedRow.nativeDetail, undefined, "hosts without native detail must not acquire one");
+		} else {
+			strictEqual(baseRow.nativeDetail, modelDefinition.description, "the host's native detail is the canonical static description");
+			strictEqual(translatedRow.nativeDetail, dictionary[modelDefinition.description]);
+			strictEqual(translatedRow.state, "test-provider/test-model");
+		}
 		strictEqual(modelDefinition.description, "Switch model for this session", "wrapping the live item leaves the canonical model description intact");
 	});
 

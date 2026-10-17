@@ -15,20 +15,24 @@ if ($HomeDir -eq '~' -or $HomeDir.StartsWith('~/') -or $HomeDir.StartsWith('~\')
 }
 $HomeDir = [IO.Path]::GetFullPath($HomeDir)
 $ZhDir = Join-Path $HomeDir ".omp\zh"
+$ManifestPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\install-manifest.tsv"))
+if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+	throw "Install manifest not found: $ManifestPath"
+}
 $Removed = $false
-$OwnedFiles = @(
-	(Join-Path $HomeDir ".omp\agent\extensions\zhomp.ts"),
-	(Join-Path $ZhDir "dict.json"),
-	(Join-Path $ZhDir "launch.ts"),
-	(Join-Path $ZhDir "host.ts"),
-	(Join-Path $ZhDir "launch.json"),
-	(Join-Path $ZhDir "model-ui.ts"),
-	(Join-Path $ZhDir "settings-ui.ts"),
-	(Join-Path $ZhDir "zhomp.toml"),
-	(Join-Path $HomeDir ".bun\bin\zhomp"),
-	(Join-Path $HomeDir ".bun\bin\zhomp.cmd")
-)
-foreach ($File in $OwnedFiles) {
+$ManifestLines = Get-Content -LiteralPath $ManifestPath -Encoding UTF8
+foreach ($Line in $ManifestLines) {
+	$Fields = $Line.Split([char]9)
+	if ($Fields.Count -ne 4 -or [string]::IsNullOrWhiteSpace($Fields[0]) -or [string]::IsNullOrWhiteSpace($Fields[1]) -or [string]::IsNullOrWhiteSpace($Fields[2]) -or [string]::IsNullOrWhiteSpace($Fields[3])) {
+		throw "Invalid install manifest row: $Line"
+	}
+	$RelativePath = $Fields[2]
+	$NativeRelativePath = $RelativePath.Replace([char]47, [char]92)
+	$Segments = $NativeRelativePath.Split([IO.Path]::DirectorySeparatorChar)
+	if ([IO.Path]::IsPathRooted($NativeRelativePath) -or $RelativePath.Contains('\') -or ($Segments -contains '') -or ($Segments -contains '.') -or ($Segments -contains '..')) {
+		throw "Install manifest destination must be a relative path: $RelativePath"
+	}
+	$File = Join-Path $HomeDir $NativeRelativePath
 	if (Test-Path -LiteralPath $File) {
 		$Item = Get-Item -LiteralPath $File -Force
 		if ($Item.PSIsContainer) { throw "Refusing to delete a non-file target: $File" }

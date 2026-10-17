@@ -2,6 +2,15 @@
 
 ## 未发布
 
+- Model 固定文案目录集中到 `runtime/model-text.ts`，补齐 12 个活跃键并检查随包字典完整性、首尾空格和插值占位符；自定义字典缺键仍保留原文。ANSI `assign roles` 使用整句翻译，native 回退赋值状态不再错误依赖预设功能。
+- 恢复 OMP 18.3.2 OAuth 提示 `(Enter)` 的有限精确源码形状；将 native 描述与压缩限制能力分别验收。设置验收保留静态原始按键及 template-first 优先级，旧宿主不依赖不存在的 key-hint-format 模块。
+- 补齐 OMP 18.11.3 的自动 Prewalk、隔离子代理与 `/seance` 固定文案，以及历史 `/prewalk` 和 macOS 词典补全说明；Apple 等专有名词保持原文。
+- V11 在真实解包安装上运行 SettingsHost／ModelHub 消费探针，并验证缺少已安装的 Model 文案目录时消费失败；不再以 `--version` 单独证明运行模块完整。
+- 设置元数据翻译改为完整 prepare 后统一 apply，删除校验包装图和生产未消费的计数；后部字段校验失败不会提前更新已有 live getter 的字典，保留原 getter／setter、对象及数组身份。
+- preload、Model、设置消费者和扩展共用 `runtime/diagnostics.ts`：统一通知队列与单个 `[zhomp]` 前缀，保留失败通知并在后续 UI 接入重试，session shutdown 解除旧 UI reporter；不向交互终端输出运行期诊断。
+- 安装、自有文件卸载及发布检查共用 `install-manifest.tsv`；卸载保持无 Bun、保留用户旁文件。修正验收中 macOS `/var`／`/private/var` 与 Windows 短路径／长路径的身份比较，不改变 launcher 的实际 cwd。
+- 修正斜杠验收对旧宿主 bare `/` 同步补全和 nativeDetail 的错误要求；冷宿主模块导入移至独立有界初始化，单条行为断言不再承受 Windows 冷编译耗时。
+
 - 适配 OMP 18.11.1 的 ModelHub 压缩限制交互及新版 ANSI/native 文案结构，修复旧的精确源码锚点失配导致整页跳过汉化的问题。保留旧版形状与未知形状原文加载，不改角色、模型 ID、限制值或输入语法。
 - 移除扩展启动和补全注册的成功／计数日志，避免原始终端输出插入底栏并干扰重绘；运行期故障改由宿主 UI 通知呈现，ModelHub 加载诊断可排队至 UI 就绪，前置启动失败仍保留报错。
 - 补齐当前宿主的程序状态、回退条件等设置文案及新增斜杠命令说明；带参数提示的补全文案仅接受宿主的精确格式，未知自定义前缀不再被部分翻译。

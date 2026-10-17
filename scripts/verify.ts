@@ -1,11 +1,12 @@
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync, existsSync, mkdirSync, realpathSync, renameSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { discoverPackage, HostNotFoundError, install } from "./install-core";
+import { discoverPackage, expectedInstallationPaths, HostNotFoundError, install } from "./install-core";
 import { readSupportPolicy } from "../runtime/host";
 import type { HostPackage } from "../runtime/host";
 import { makeTempDir, removeTree, runCommand, snapshotTree, createHostFixture, writeText } from "../tests/verification-fixtures";
+import type { Env } from "./install-core";
 import type { CommandResult } from "../tests/verification-fixtures";
 
 function versionBelow(version: string): string {
@@ -79,6 +80,12 @@ async function installFixture(root: string, homeDir: string): Promise<{ packageD
 	return { packageDir, paths: result.paths };
 }
 
+function assertManifestInstalled(repoDir: string, env: Env): void {
+	for (const path of expectedInstallationPaths(repoDir, env)) {
+		assertion(existsSync(path), `manifest artifact was not installed: ${path}`);
+	}
+}
+
 async function v03(): Promise<string> {
 	return withTemp("zhomp-v03", async root => {
 		const home = join(root, "home");
@@ -93,7 +100,7 @@ async function v03(): Promise<string> {
 		const state = await runCommand(bun, ["--no-install", "--no-env-file", config, launch, "launch"], { cwd: project, env: { ...process.env, OMP_ZH_BOOTSTRAP_CWD: "invalid-external-value", OMP_ZH_LAUNCHER_PARENT_PID: "-1" } });
 		assertion(state.exitCode === 0, state.stderr);
 		const observed: unknown = JSON.parse(state.stdout.trim());
-		assertion(observed !== null && typeof observed === "object" && "cwd" in observed && observed.cwd === project, "launcher did not restore project cwd");
+		assertion(observed !== null && typeof observed === "object" && "cwd" in observed && typeof observed.cwd === "string" && realpathSync(observed.cwd) === realpathSync(project), "launcher did not restore project cwd");
 		assertion("enabled" in observed && observed.enabled === "1" && "pidMatches" in observed && observed.pidMatches === true, "launcher authorization was not process-bound");
 		writeText(join(project, "bunfig.toml"), 'preload = ["./missing-project-preload.ts"]\n');
 		const isolated = await runCommand(bun, ["--no-install", "--no-env-file", config, launch, "read", "./marker.txt"], { cwd: project });
@@ -159,12 +166,12 @@ async function v06(): Promise<string> {
 	return withTemp("zhomp-v06", async root => {
 		const home = join(root, "custom-home");
 		const { packageDir } = await installFixture(root, home);
+		assertManifestInstalled(repoDir, { ...process.env, OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: packageDir, OMP_ZH_INSTALL_SHELL: "bash" });
 		const config = JSON.parse(readFileSync(join(home, ".omp", "zh", "launch.json"), "utf8")) as Record<string, unknown>;
-		assertion(existsSync(join(home, ".omp", "zh", "host.ts")), "host.ts was not installed");
-		assertion(existsSync(join(home, ".omp", "zh", "settings-ui.ts")), "settings-ui.ts was not installed");
-		assertion(typeof config.extensionPath === "string" && config.extensionPath.startsWith(home), "extension path escaped custom home");
-		assertion(typeof config.dictPath === "string" && config.dictPath.startsWith(home), "dictionary path escaped custom home");
-		assertion(config.packageDir === packageDir, "host package path was not persisted");
+		const canonicalHomePrefix = `${realpathSync(home)}${sep}`;
+		assertion(typeof config.extensionPath === "string" && realpathSync(config.extensionPath).startsWith(canonicalHomePrefix), "extension path escaped custom home");
+		assertion(typeof config.dictPath === "string" && realpathSync(config.dictPath).startsWith(canonicalHomePrefix), "dictionary path escaped custom home");
+		assertion(typeof config.packageDir === "string" && realpathSync(config.packageDir) === realpathSync(packageDir), "host package path was not persisted");
 		assertion(config.supportedRange === supported, "supported range was not persisted");
 		const custom = join(root, "custom-dict.json");
 		writeText(custom, '{"Theme":"自定义主题"}');
@@ -174,8 +181,8 @@ async function v06(): Promise<string> {
 		});
 		assertion(result.exitCode === 0, result.stderr);
 		const observed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-		assertion(observed.dict === custom, "explicit relative dictionary did not take precedence");
-		return "custom home owns extension, dictionary, launch configuration, and settings UI runtime";
+		assertion(typeof observed.dict === "string" && realpathSync(observed.dict) === realpathSync(custom), "explicit relative dictionary did not take precedence");
+		return "custom home owns every manifest artifact and resolves its configured paths";
 	});
 }
 
@@ -190,13 +197,17 @@ async function v08(): Promise<string> {
 		const bytes = readFileSync(join(repoDir, file));
 		assertion(!bytes.includes(Buffer.from("\r\n")), `${file} contains CRLF`);
 	}
+	const manifest = readFileSync(join(repoDir, "install-manifest.tsv"));
+	assertion(!manifest.includes(Buffer.from("\r")), "install-manifest.tsv must use LF line endings");
+	const powershellUninstaller = readFileSync(join(repoDir, "scripts", "uninstall.ps1"));
+	assertion(!powershellUninstaller.includes(Buffer.from("\r")), "scripts/uninstall.ps1 must use LF line endings");
 	const bash = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
 	if (!existsSync(bash) && process.platform === "win32") throw new Error("SKIP: Git Bash is unavailable");
 	for (const file of ["scripts/install.sh", "scripts/uninstall.sh"]) {
 		const result = await runCommand(bash, ["-n", file], { cwd: repoDir });
 		assertion(result.exitCode === 0, result.stderr);
 	}
-	return "both shell scripts are LF and parse in the available Bash";
+	return "Bash scripts parse, and the manifest and PowerShell uninstaller use LF line endings";
 }
 
 async function v09(): Promise<string> {
@@ -207,10 +218,6 @@ async function v09(): Promise<string> {
 			if (shell === "bash" && process.platform === "win32" && !existsSync(bash)) throw new Error("SKIP: Git Bash unavailable for cross-shell uninstall");
 			const home = join(root, `${shell} home [1]`);
 			const installed = await installFixture(join(root, shell), home);
-			const installedHost = join(home, ".omp", "zh", "host.ts");
-			assertion(installed.paths.includes(installedHost), "host.ts is missing from the uninstall manifest");
-			const installedSettingsUi = join(home, ".omp", "zh", "settings-ui.ts");
-			assertion(installed.paths.includes(installedSettingsUi), "settings-ui.ts is missing from the uninstall manifest");
 			writeText(join(home, ".omp", "zh", "user.txt"), "keep");
 			writeText(join(home, ".omp", "zh", ".hidden"), "hidden");
 			writeText(join(home, ".omp", "zh", "child", "nested"), "nested");
@@ -218,7 +225,7 @@ async function v09(): Promise<string> {
 			const args = shell === "powershell" ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(repoDir, "scripts", "uninstall.ps1")] : [join(repoDir, "scripts", "uninstall.sh")];
 			const env = { ...process.env, OMP_ZH_HOME: home };
 			for (let repeat = 0; repeat < 2; repeat++) {
-				const result = await runCommand(command, args, { env });
+				const result = await runCommand(command, args, { env, cwd: root });
 				assertion(result.exitCode === 0, result.stderr || result.stdout);
 				for (const path of installed.paths) assertion(!existsSync(path), `owned file remains: ${path}`);
 				assertion(existsSync(join(home, ".omp", "zh")), "uninstall removed the directory containing user files");
@@ -231,101 +238,111 @@ async function v09(): Promise<string> {
 	});
 }
 
+type ModelSurfaceMode = "ordinary" | "translated" | "hostile";
+
+function installedProbeEnvironment(probeRoot: string, launchConfigPath: string): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	env.PI_CODING_AGENT_DIR = probeRoot;
+	env.PI_CONFIG_DIR = relative(homedir(), join(probeRoot, "config"));
+	env.OMP_PROFILE = undefined;
+	env.PI_PROFILE = undefined;
+	env.OMP_ZH_DICT = undefined;
+	env.PROBE_DIR = probeRoot;
+	env.OMP_ZH_CONFIG = launchConfigPath;
+	return env;
+}
+
+async function verifyInstalledSettingsSurface(host: HostPackage, env: NodeJS.ProcessEnv): Promise<string> {
+	const result = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-surface.ts")], {
+		cwd: host.packageDir,
+		env,
+	});
+	assertion(result.exitCode === 0, result.stderr || result.stdout);
+	const surface: unknown = JSON.parse(result.stdout.trim());
+	assertion(surface !== null && typeof surface === "object" && !Array.isArray(surface), "real settings integration must emit a clean structured surface result");
+	assertion(
+		"loader" in surface && surface.loader === true &&
+		"component" in surface && surface.component === "SettingsSelectorComponent" &&
+		"label" in surface && surface.label === "深色主题",
+		"real settings selector must surface translated UI text",
+	);
+	assertion(
+		"slash" in surface && surface.slash !== null && typeof surface.slash === "object" && !Array.isArray(surface.slash),
+		"real extension lifecycle must surface its slash autocomplete result",
+	);
+	const slashSurface = surface.slash;
+	assertion(
+		"registered" in slashSurface && slashSurface.registered === true &&
+		"description" in slashSurface && typeof slashSurface.description === "string" && slashSurface.description !== "Open settings menu" &&
+		"accepted" in slashSurface && slashSurface.accepted === "/settings " &&
+		"errorNotification" in slashSurface && slashSurface.errorNotification === true,
+		"real slash UI must translate display text, preserve the selected command, and surface failures via UI notification",
+	);
+	return JSON.stringify(surface);
+}
+
+async function verifyInstalledModelSurface(host: HostPackage, env: NodeJS.ProcessEnv, mode: ModelSurfaceMode): Promise<string> {
+	const command = ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-model-surface.ts")];
+	const result = await runCommand(bun, command, {
+		cwd: host.packageDir,
+		env: { ...env, MODEL_SURFACE_MODE: mode },
+		timeout: 120_000,
+	});
+	assertion(result.exitCode === 0, result.stderr || result.stdout);
+	const surface: unknown = JSON.parse(result.stdout.trim());
+	assertion(surface !== null && typeof surface === "object" && !Array.isArray(surface), `ModelHub ${mode} must emit a clean structured surface result`);
+	assertion(
+		"mode" in surface && surface.mode === mode &&
+		"component" in surface && surface.component === "ModelHubComponent",
+		`ModelHub ${mode} did not surface its real component`,
+	);
+	assertion(
+		"unrelatedConsumer" in surface && surface.unrelatedConsumer === "ModelBrowser remains English",
+		`ModelHub ${mode} globally translated the sibling ModelBrowser`,
+	);
+	assertion("roleTag" in surface && surface.roleTag === "SMOL", "ModelHub must preserve builtin role names in every language mode");
+	const title = "title" in surface ? surface.title : undefined;
+	if (mode === "ordinary") {
+		assertion(title === "Models", "the mismatched-PID process must retain the original ModelHub text");
+	} else {
+		assertion(typeof title === "string" && title !== "Models", "the real ModelHub title must display the dictionary text");
+		assertion("configWrites" in surface && surface.configWrites === 0, "the translated probe must not persist user settings");
+		const nativeDescribe = "nativeDescribe" in surface ? surface.nativeDescribe : undefined;
+		assertion(
+			typeof nativeDescribe === "string" &&
+			(nativeDescribe === `covered@${host.version}` || nativeDescribe === `unavailable@${host.version}`),
+			`native describe capability evidence is missing for OMP ${host.version}`,
+		);
+		if (mode === "hostile") {
+			assertion(
+				typeof title === "string" && title.includes("__zhompModelUiInjected") &&
+				"injectionSideEffect" in surface && surface.injectionSideEffect === false,
+				"hostile dictionary text must remain literal and side-effect free",
+			);
+		} else {
+			assertion("model" in surface && surface.model === "Models/Roles", "the real ModelHub consumer changed model or selector identities");
+		}
+	}
+	return JSON.stringify(surface);
+}
+
+async function verifyInstalledConsumers(host: HostPackage, env: NodeJS.ProcessEnv, modes: readonly ModelSurfaceMode[]): Promise<string> {
+	const outputs = [await verifyInstalledSettingsSurface(host, env)];
+	for (const mode of modes) outputs.push(await verifyInstalledModelSurface(host, env, mode));
+	return outputs.join("\n");
+}
+
 async function v10(): Promise<string> {
 	const discovered = discoverRealHost();
 	return withTemp("zhomp-v10", async root => {
 		const home = join(root, "home");
-		const installed = install(repoDir, { ...process.env, OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: discovered.packageDir, OMP_ZH_INSTALL_SHELL: "bash" });
-		assertion(installed.packageDir === discovered.packageDir, "real host installation selected a different package");
-		const installDir = join(home, ".omp", "zh");
-		assertion(existsSync(join(installDir, "model-ui.ts")), "installed model-ui.ts is missing");
-		assertion(existsSync(join(installDir, "settings-ui.ts")), "installed settings-ui.ts is missing");
-		const configPath = join(installDir, "launch.json");
-		const command = ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-model-surface.ts")];
-		const env = {
-			...process.env,
-			PI_CODING_AGENT_DIR: root,
-			PI_CONFIG_DIR: relative(homedir(), join(root, "config")),
-			OMP_PROFILE: undefined,
-			PI_PROFILE: undefined,
-			OMP_ZH_DICT: undefined,
-			PROBE_DIR: root,
-			OMP_ZH_CONFIG: configPath,
-		};
-		const settingsSurface = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-surface.ts")], {
-			cwd: discovered.packageDir,
-			env,
-		});
-		assertion(settingsSurface.exitCode === 0, settingsSurface.stderr || settingsSurface.stdout);
-		const settingsSurfaceData: unknown = JSON.parse(settingsSurface.stdout.trim());
-		assertion(
-			settingsSurfaceData !== null && typeof settingsSurfaceData === "object" && !Array.isArray(settingsSurfaceData),
-			"real settings integration must emit a clean structured surface result",
-		);
-		assertion(
-			"loader" in settingsSurfaceData && settingsSurfaceData.loader === true &&
-			"component" in settingsSurfaceData && settingsSurfaceData.component === "SettingsSelectorComponent" &&
-			"label" in settingsSurfaceData && settingsSurfaceData.label === "深色主题",
-			"real settings selector must surface translated UI text",
-		);
-		assertion(
-			"slash" in settingsSurfaceData && settingsSurfaceData.slash !== null &&
-			typeof settingsSurfaceData.slash === "object" && !Array.isArray(settingsSurfaceData.slash),
-			"real extension lifecycle must surface its slash autocomplete result",
-		);
-		const slashSurface = settingsSurfaceData.slash;
-		assertion(
-			"registered" in slashSurface && slashSurface.registered === true &&
-			"description" in slashSurface && typeof slashSurface.description === "string" && slashSurface.description !== "Open settings menu" &&
-			"accepted" in slashSurface && slashSurface.accepted === "/settings " &&
-			"errorNotification" in slashSurface && slashSurface.errorNotification === true,
-			"real slash UI must translate display text, preserve the selected command, and surface failures via UI notification",
-		);
-		const outputs: string[] = [JSON.stringify(settingsSurfaceData)];
-		for (const mode of ["ordinary", "translated", "hostile"] as const) {
-			const result = await runCommand(bun, command, {
-				cwd: discovered.packageDir,
-				env: { ...env, MODEL_SURFACE_MODE: mode },
-				timeout: 120_000,
-			});
-			assertion(result.exitCode === 0, result.stderr || result.stdout);
-			const modelSurface: unknown = JSON.parse(result.stdout.trim());
-			assertion(modelSurface !== null && typeof modelSurface === "object" && !Array.isArray(modelSurface), `V10 ${mode} must emit a clean structured ModelHub surface result`);
-			assertion(
-				"mode" in modelSurface && modelSurface.mode === mode &&
-				"component" in modelSurface && modelSurface.component === "ModelHubComponent",
-				`V10 ${mode} did not surface the real ModelHub component`,
-			);
-			assertion(
-				"unrelatedConsumer" in modelSurface && modelSurface.unrelatedConsumer === "ModelBrowser remains English",
-				`V10 ${mode} globally translated the sibling ModelBrowser`,
-			);
-			assertion("roleTag" in modelSurface && modelSurface.roleTag === "SMOL", "ModelHub must preserve builtin role names in every language mode");
-			const title = "title" in modelSurface ? modelSurface.title : undefined;
-			if (mode === "ordinary") {
-				assertion(title === "Models", "the mismatched-PID process must retain the original ModelHub text");
-			} else {
-				assertion(typeof title === "string" && title !== "Models", "the real ModelHub title must display the dictionary text");
-				assertion("configWrites" in modelSurface && modelSurface.configWrites === 0, "the translated probe must not persist user settings");
-				const nativeDescribe = "nativeDescribe" in modelSurface ? modelSurface.nativeDescribe : undefined;
-				assertion(
-					typeof nativeDescribe === "string" &&
-					(nativeDescribe === `covered@${discovered.version}` || nativeDescribe === `unavailable@${discovered.version}`),
-					`native describe capability evidence is missing for OMP ${discovered.version}`,
-				);
-				if (mode === "hostile") {
-					assertion(
-						typeof title === "string" && title.includes("__zhompModelUiInjected") &&
-						"injectionSideEffect" in modelSurface && modelSurface.injectionSideEffect === false,
-						"hostile dictionary text must remain literal and side-effect free",
-					);
-				} else {
-					assertion("model" in modelSurface && modelSurface.model === "Models/Roles", "the real ModelHub consumer changed model or selector identities");
-				}
-			}
-			outputs.push(JSON.stringify(modelSurface));
-		}
-		return outputs.join("\n");
+		const installEnv = { ...process.env, OMP_ZH_HOME: home, OMP_ZH_PACKAGE_DIR: discovered.packageDir, OMP_ZH_INSTALL_SHELL: "bash" };
+		const installed = install(repoDir, installEnv);
+		assertManifestInstalled(repoDir, installEnv);
+		assertion(realpathSync(installed.packageDir) === realpathSync(discovered.packageDir), "real host installation selected a different package");
+		const configPath = join(home, ".omp", "zh", "launch.json");
+		const env = installedProbeEnvironment(root, configPath);
+		return verifyInstalledConsumers(discovered, env, ["ordinary", "translated", "hostile"]);
 	});
 }
 
@@ -340,11 +357,11 @@ async function v11(): Promise<string> {
 		const tar = await runCommand("tar", ["-xzf", archive, "-C", extract]);
 		assertion(tar.exitCode === 0, tar.stderr);
 		const packageRoot = join(extract, "package");
-		for (const file of ["README.md", "INSTALL.md", "LICENSE", "CHANGELOG.md", "runtime/host.ts", "runtime/launch.ts", "runtime/model-ui.ts", "runtime/zhomp.toml", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.ps1", "scripts/install.sh", "scripts/uninstall.ps1", "scripts/uninstall.sh", "extensions/zhomp.ts", "dict/zh-CN.json"]) {
+		for (const file of ["README.md", "INSTALL.md", "LICENSE", "CHANGELOG.md", "scripts/install.ts", "scripts/install-core.ts", "scripts/install.ps1", "scripts/install.sh", "scripts/uninstall.ps1", "scripts/uninstall.sh"]) {
 			assertion(existsSync(join(packageRoot, file)), `packed file missing: ${file}`);
 		}
 		assertion(!existsSync(join(packageRoot, "IMPROVEMENT_PLAN.md")), "review report leaked into package");
-		const help = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(packageRoot, "runtime", "zhomp.toml")}`, join(packageRoot, "scripts", "install.ts"), "--help"], { cwd: packageRoot });
+		const help = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(packageRoot, "runtime", "zhomp.toml")}`, join(packageRoot, "scripts", "install.ts"), "--help"], { cwd: root });
 		assertion(help.exitCode === 0 && help.stdout.includes("Usage:"), help.stderr || help.stdout);
 		for (const document of ["README.md", "INSTALL.md"]) {
 			const text = readFileSync(join(packageRoot, document), "utf8");
@@ -355,16 +372,35 @@ async function v11(): Promise<string> {
 		}
 		const host = discoverRealHost();
 		const installedHome = join(root, "installed");
+		const installEnv = { ...process.env, OMP_ZH_HOME: installedHome, OMP_ZH_PACKAGE_DIR: host.packageDir };
 		const actualInstall = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(packageRoot, "runtime", "zhomp.toml")}`, join(packageRoot, "scripts", "install.ts")], {
-			cwd: packageRoot, env: { ...process.env, OMP_ZH_HOME: installedHome, OMP_ZH_PACKAGE_DIR: host.packageDir },
+			cwd: root,
+			env: installEnv,
 		});
 		assertion(actualInstall.exitCode === 0, actualInstall.stderr || actualInstall.stdout);
-		assertion(existsSync(join(installedHome, ".omp", "zh", "host.ts")), "installed host.ts is missing");
-		assertion(existsSync(join(installedHome, ".omp", "zh", "model-ui.ts")), "installed model-ui.ts is missing");
-		assertion(existsSync(join(installedHome, ".omp", "zh", "launch.json")), "installed launch.json is missing");
+		assertManifestInstalled(packageRoot, installEnv);
+		const configPath = join(installedHome, ".omp", "zh", "launch.json");
+		const probeEnv = installedProbeEnvironment(root, configPath);
+		await verifyInstalledConsumers(host, probeEnv, ["translated"]);
+
+		const modelTextPath = join(installedHome, ".omp", "zh", "model-text.ts");
+		const withheldModelTextPath = join(root, "model-text.ts.withheld");
+		renameSync(modelTextPath, withheldModelTextPath);
+		try {
+			let rejectedWithoutModelText = false;
+			try {
+				await verifyInstalledModelSurface(host, probeEnv, "translated");
+			} catch {
+				rejectedWithoutModelText = true;
+			}
+			assertion(rejectedWithoutModelText, "the real ModelHub consumer passed without its installed text catalogue");
+		} finally {
+			renameSync(withheldModelTextPath, modelTextPath);
+		}
+
 		const version = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(installedHome, ".omp", "zh", "zhomp.toml")}`, join(installedHome, ".omp", "zh", "launch.ts"), "--version"], { cwd: root });
 		assertion(version.exitCode === 0 && version.stdout.includes(`omp/${host.version}`), version.stderr || version.stdout);
-		return "tarball includes model-ui.ts and the unpacked installer publishes and launches the complete runtime";
+		return "the unpacked installer passed real installed SettingsHost and ModelHub probes; removing model-text.ts made the ModelHub probe fail";
 	});
 }
 

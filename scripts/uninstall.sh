@@ -15,18 +15,37 @@ if [[ "$home_dir" == '~' || "$home_dir" == '~/'* ]]; then
 	home_dir="$default_home${home_dir:1}"
 fi
 zh_dir="$home_dir/.omp/zh"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+manifest="$script_dir/install-manifest.tsv"
+if [[ ! -f "$manifest" ]]; then
+	printf '错误：找不到自有文件清单: %s\n' "$manifest" >&2
+	exit 1
+fi
 removed=0
-for file in \
-	"$home_dir/.omp/agent/extensions/zhomp.ts" \
-	"$zh_dir/dict.json" \
-	"$zh_dir/launch.ts" \
-	"$zh_dir/host.ts" \
-	"$zh_dir/launch.json" \
-	"$zh_dir/model-ui.ts" \
-	"$zh_dir/settings-ui.ts" \
-	"$zh_dir/zhomp.toml" \
-	"$home_dir/.bun/bin/zhomp" \
-	"$home_dir/.bun/bin/zhomp.cmd"; do
+
+valid_relative_destination() {
+	local destination="$1"
+	local component
+	local -a components
+	[[ -n "$destination" && "$destination" != /* && "$destination" != *\\* ]] || return 1
+	IFS=/ read -r -a components <<< "$destination"
+	for component in "${components[@]}"; do
+		[[ -n "$component" && "$component" != "." && "$component" != ".." ]] || return 1
+	done
+	return 0
+}
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+	IFS=$'\t' read -r kind source destination platform extra <<< "$line"
+	if [[ -z "${kind:-}" || -z "${source:-}" || -z "${destination:-}" || -z "${platform:-}" || -n "${extra:-}" || "$line" == *$'\r'* ]]; then
+		printf '错误：自有文件清单行格式无效: %s\n' "$line" >&2
+		exit 1
+	fi
+	if ! valid_relative_destination "$destination"; then
+		printf '错误：自有文件清单目标必须是相对路径: %s\n' "$destination" >&2
+		exit 1
+	fi
+	file="$home_dir/$destination"
 	if [ -f "$file" ] || [ -L "$file" ]; then
 		rm -- "$file"
 		printf '已删除: %s\n' "$file"
@@ -35,7 +54,7 @@ for file in \
 		printf '错误：拒绝删除非文件目标: %s\n' "$file" >&2
 		exit 1
 	fi
-done
+done < "$manifest"
 if [ -d "$zh_dir" ]; then
 	# rmdir only succeeds for an empty directory. Keep user side files untouched.
 	if ! rmdir -- "$zh_dir" 2>/dev/null; then

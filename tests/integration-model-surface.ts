@@ -649,9 +649,9 @@ try {
 		callbacks,
 		{ currentSelector: "Models/Roles" },
 	);
-	const nativeAvailable = typeof modelHub.describe === "function";
+	const nativeDescribeAvailable = typeof modelHub.describe === "function";
 	let nativePickerModule: { CLOSE_ACTION: NativePickerAction } | undefined;
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		// Resolve the shared action from ModelHub's installed pi-tui module instance.
 		const nativePickerPath = Bun.resolveSync("@oh-my-pi/pi-tui/native/picker", launch.host.packageDir);
 		nativePickerModule = await import(pathToFileURL(nativePickerPath).href) as { CLOSE_ACTION: NativePickerAction };
@@ -697,8 +697,8 @@ try {
 	assertWidth(modelHub.render(80), 80, textUtils.visibleWidth, "narrow all-model view");
 	strictEqual(counters.refreshCalls, 0, "a scoped display-only model must not trigger catalog refresh");
 
-	const allNativeValue = nativeAvailable ? materializeNative(modelHub.describe?.(pickerContext), pickerContext) : undefined;
-	const allNativeTreeValue = nativeAvailable ? materializeNative(modelHub.describe?.(treeContext), treeContext) : undefined;
+	const allNativeValue = nativeDescribeAvailable ? materializeNative(modelHub.describe?.(pickerContext), pickerContext) : undefined;
+	const allNativeTreeValue = nativeDescribeAvailable ? materializeNative(modelHub.describe?.(treeContext), treeContext) : undefined;
 	const allNative = allNativeValue === undefined ? undefined : JSON.stringify(allNativeValue);
 	if (allNative) {
 		ok(allNative.includes(JSON.stringify(title)), "native picker description must carry the literal panel title");
@@ -710,7 +710,7 @@ try {
 		deepStrictEqual(pickerTabs.map(tab => tab.id), modelKindIds, "native picker must preserve all model-kind IDs");
 		deepStrictEqual(pickerTabs.map(tab => tab.label), modelKindPickerLabels, "native picker must translate only the all-kind display label");
 	}
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		if (allNativeTreeValue === undefined) throw new Error("The native ModelHub tree description is missing");
 		const treeText = JSON.stringify(allNativeTreeValue);
 		if (treeText === undefined) throw new Error("The native ModelHub tree description cannot be serialized");
@@ -728,7 +728,7 @@ try {
 	const sharedCloseAction = nativePickerModule?.CLOSE_ACTION;
 	const sharedCloseActionSnapshot = sharedCloseAction ? { ...sharedCloseAction, keys: [...(sharedCloseAction.keys ?? [])] } : undefined;
 	const closeAction = nativePickerActions(allNativeValue)?.find(action => action.id === "close");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		if (!closeAction || !sharedCloseAction) throw new Error("The native picker close action is missing");
 		strictEqual(closeAction.label, requiredUiLabel("Close"), "ModelHub must translate its cloned close action");
 		strictEqual(closeAction.id, sharedCloseAction.id, "translated close action must retain the shared action ID");
@@ -739,19 +739,27 @@ try {
 
 	modelHub.handleInput("\x1b[A");
 	modelHub.handleInput("\r");
-	const initialRoleNative = nativeAvailable ? materializeNative(modelHub.describe?.(treeContext), treeContext) : undefined;
+	const initialRoleNative = nativeDescribeAvailable ? materializeNative(modelHub.describe?.(treeContext), treeContext) : undefined;
 	const selectedRoleBefore = nativeRoleSelection(initialRoleNative);
 	const roleAnsiBeforeDown = Bun.stripANSI(modelHub.render(160).join("\n"));
 	modelHub.handleInput("\x1b[B");
-	const movedRoleNative = nativeAvailable ? materializeNative(modelHub.describe?.(treeContext), treeContext) : undefined;
-	const movedRolePicker = nativeAvailable ? materializeNative(modelHub.describe?.(pickerContext), pickerContext) : undefined;
+	const movedRoleNative = nativeDescribeAvailable ? materializeNative(modelHub.describe?.(treeContext), treeContext) : undefined;
+	const movedRolePicker = nativeDescribeAvailable ? materializeNative(modelHub.describe?.(pickerContext), pickerContext) : undefined;
 	const selectedRoleAfter = nativeRoleSelection(movedRoleNative);
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		strictEqual(selectedRoleBefore, "role:default", "Enter should enter Roles at the first built-in role");
 		strictEqual(selectedRoleAfter, "role:smol", "Down should move to the next role while preserving its logical ID");
 	}
 
 	const roleAnsi = Bun.stripANSI(modelHub.render(160).join("\n"));
+	const roleStatus = localizedText(
+		dictionary,
+		translationEnabled,
+		"Model roles — {key} adds a retry fallback, cleared roles fall back to auto-selection",
+		{ key: "f" },
+	);
+	ok(roleAnsi.includes(roleStatus), "the real ANSI Roles status must translate its dynamic key hint");
+	if (translationEnabled) ok(!roleAnsi.includes("Model roles —"), "the ANSI Roles status must not fall back to English");
 	for (const label of roleTabLabels) ok(roleAnsi.includes(label), `the ANSI Roles tabs must display ${label}`);
 	const presetTitle = dictionary["Preset:"];
 	const hasPresetUi = roleAnsi.includes("Preset:") || (presetTitle !== undefined && roleAnsi.includes(presetTitle));
@@ -788,8 +796,40 @@ try {
 	assertWidth(modelHub.render(160), 160, textUtils.visibleWidth, "normal Roles view");
 	assertWidth(modelHub.render(80), 80, textUtils.visibleWidth, "narrow Roles view");
 
-	const encodedRoleTree = nativeAvailable ? JSON.stringify(movedRoleNative) : undefined;
-	const encodedRolePicker = nativeAvailable ? JSON.stringify(movedRolePicker) : undefined;
+	const encodedRoleTree = nativeDescribeAvailable ? JSON.stringify(movedRoleNative) : undefined;
+	const encodedRolePicker = nativeDescribeAvailable ? JSON.stringify(movedRolePicker) : undefined;
+	if (nativeDescribeAvailable && encodedRoleTree && encodedRolePicker) {
+		const statusPrefix = requiredUiLabel("Model roles — ");
+		const statusSuffix = requiredUiLabel(" adds a retry fallback, cleared roles fall back to auto-selection");
+		ok(encodedRoleTree.includes(statusPrefix), "the native Roles status must translate its spaced prefix");
+		ok(encodedRoleTree.includes(statusSuffix), "the native Roles status must translate its spaced suffix");
+		const unassignedPreview = requiredUiLabel("Not assigned; no available model fits this role.");
+		ok(encodedRolePicker.includes(unassignedPreview), "the native unassigned-role preview must translate");
+		if (translationEnabled) {
+			ok(!encodedRoleTree.includes("Model roles — "), "the native Roles status prefix must not fall back to English");
+			ok(!encodedRoleTree.includes(" adds a retry fallback, cleared roles fall back to auto-selection"), "the native Roles status suffix must not fall back to English");
+			ok(!encodedRolePicker.includes("Not assigned; no available model fits this role."), "the native unassigned-role preview must not fall back to English");
+		}
+	}
+	if (nativeDescribeAvailable) {
+		// Unscoped hubs legitimately refresh their catalogue; keep that fixture independent of scoped navigation.
+		const unscopedRegistry = createProviderRegistry({ ...counters }, { providers: ["Models"], lookupModels: [model] });
+		const unscopedRoleHub = new modelHubModule.ModelHubComponent(
+			fakeTui,
+			settings,
+			unscopedRegistry,
+			[],
+			callbacks,
+			{ currentSelector: "Models/Roles" },
+		);
+		fixtureHubs.push(unscopedRoleHub);
+		unscopedRoleHub.handleInput("\x1b[A");
+		unscopedRoleHub.handleInput("\r");
+		const unscopedRolePicker = JSON.stringify(materializeNative(unscopedRoleHub.describe?.(pickerContext), pickerContext));
+		const clearedRoleHint = requiredUiLabel("Cleared roles fall back to auto-selection");
+		ok(unscopedRolePicker.includes(clearedRoleHint), "the real unscoped Roles subtitle must translate its auto-selection hint");
+		if (translationEnabled) ok(!unscopedRolePicker.includes("Cleared roles fall back to auto-selection"), "the unscoped Roles subtitle must not fall back to English");
+	}
 	if (encodedRoleTree && encodedRolePicker) {
 		const treeRoleTabs = nativeTabs(movedRoleNative, roleTabIds);
 		const pickerRoleTabs = nativePickerTabs(movedRolePicker, roleTabIds);
@@ -836,22 +876,185 @@ try {
 		deepStrictEqual(roleInfoById[key], customRoleSnapshot[key], `custom role metadata ${key} must remain unchanged`);
 	}
 
+	const actionStripHub = new modelHubModule.ModelHubComponent(
+		fakeTui,
+		settings,
+		registry,
+		[{ model }],
+		callbacks,
+		{ currentSelector: "Models/Roles" },
+	);
+	fixtureHubs.push(actionStripHub);
+	actionStripHub.handleInput("\t");
+	const assignRolesLabel = requiredUiLabel("assign roles");
+	const assignRolesAnsi = Bun.stripANSI(actionStripHub.render(160).join("\n"));
+	ok(assignRolesAnsi.includes(assignRolesLabel), `the real model-list footer must translate assign roles; rendered ANSI:\n${assignRolesAnsi}`);
+	if (translationEnabled) ok(!assignRolesAnsi.includes("assign roles"), "the model-list footer must not retain assign roles in English");
+	if (nativeDescribeAvailable) {
+		const assignRolesTree = materializeNative(actionStripHub.describe?.(treeContext), treeContext);
+		const assignRolesHints = nativeHintsJson(assignRolesTree);
+		if (!assignRolesHints) throw new Error(`The native model-list action hints are missing; tree: ${JSON.stringify(assignRolesTree)}; ANSI: ${assignRolesAnsi}`);
+		ok(assignRolesHints.includes(JSON.stringify(assignRolesLabel)), `native model-list hints must translate assign roles; hints: ${assignRolesHints}`);
+	}
+	actionStripHub.handleInput("\r");
+	const assignClearLabel = requiredUiLabel("assign/clear");
+	const assignClearAnsi = Bun.stripANSI(actionStripHub.render(160).join("\n"));
+	ok(assignClearAnsi !== assignRolesAnsi, `model activation must show the ANSI role strip; rendered ANSI:\n${assignClearAnsi}`);
+	if (nativeDescribeAvailable) {
+		const assignClearTree = materializeNative(actionStripHub.describe?.(treeContext), treeContext);
+		const assignClearHints = nativeHintsJson(assignClearTree);
+		if (!assignClearHints) throw new Error(`The native role-strip action hints are missing; tree: ${JSON.stringify(assignClearTree)}; ANSI: ${assignClearAnsi}`);
+		ok(assignClearHints.includes(JSON.stringify(assignClearLabel)), `native role-strip hints must translate assign/clear; hints: ${assignClearHints}`);
+		if (translationEnabled) ok(!assignClearHints.includes("assign/clear"), `native role-strip hints must not retain assign/clear; hints: ${assignClearHints}`);
+	}
+	actionStripHub.handleInput("\x1b");
+
+	const modelSelector = `${model.provider}/${model.id}`;
+	const fallbackSettings: ModelHubSettings = {
+		...settings,
+		fallbackChains: { smol: [modelSelector], [modelSelector]: [modelSelector] },
+	};
+	const fallbackHub = new modelHubModule.ModelHubComponent(
+		fakeTui,
+		fallbackSettings,
+		registry,
+		[{ model }],
+		callbacks,
+		{ currentSelector: modelSelector },
+	);
+	fixtureHubs.push(fallbackHub);
+	fallbackHub.handleInput("\x1b[A");
+	fallbackHub.handleInput("\r");
+	fallbackHub.handleInput("f");
+	const addingFallbackLabel = requiredUiLabel("Adding fallback for");
+	const addingFallbackAnsi = Bun.stripANSI(fallbackHub.render(160).join("\n"));
+	ok(addingFallbackAnsi.includes(`${addingFallbackLabel} DEFAULT`), "the real ANSI assignment status must translate adding a fallback");
+	if (nativeDescribeAvailable) {
+		const addingFallbackTree = JSON.stringify(materializeNative(fallbackHub.describe?.(treeContext), treeContext));
+		ok(addingFallbackTree.includes(addingFallbackLabel), "the native assignment status must translate adding a fallback");
+	}
+	fallbackHub.handleInput("\x1b");
+	fallbackHub.handleInput("\x1b[B");
+	fallbackHub.handleInput("\x1b[B");
+	const addAnotherLabel = requiredUiLabel("add another");
+	const fallbackRowAnsi = Bun.stripANSI(fallbackHub.render(160).join("\n"));
+	ok(fallbackRowAnsi.includes(addAnotherLabel), "the real fallback-row footer must translate add another");
+	if (translationEnabled) ok(!fallbackRowAnsi.includes("add another"), "the fallback-row footer must not retain add another in English");
+	if (nativeDescribeAvailable) {
+		const fallbackRowTree = materializeNative(fallbackHub.describe?.(treeContext), treeContext);
+		const fallbackRowHints = nativeHintsJson(fallbackRowTree);
+		if (!fallbackRowHints) throw new Error("The native fallback-row hints are missing");
+		ok(fallbackRowHints.includes(JSON.stringify(addAnotherLabel)), "native fallback-row hints must translate add another");
+	}
+	fallbackHub.handleInput("\r");
+	const replacingFallbackLabel = requiredUiLabel("Replacing fallback of");
+	const replacingFallbackAnsi = Bun.stripANSI(fallbackHub.render(160).join("\n"));
+	ok(replacingFallbackAnsi.includes(`${replacingFallbackLabel} SMOL`), "the real ANSI assignment status must translate replacing a fallback");
+	if (nativeDescribeAvailable) {
+		const replacingFallbackTree = JSON.stringify(materializeNative(fallbackHub.describe?.(treeContext), treeContext));
+		ok(replacingFallbackTree.includes(replacingFallbackLabel), "the native assignment status must translate replacing a fallback");
+	}
+	fallbackHub.handleInput("\x1b");
+	const addFallbackLabel = requiredUiLabel("add fallback");
+	const clearChainLabel = requiredUiLabel("clear chain");
+	let chainKeyFooter: string | undefined;
+	for (let step = 0; step < knownRoleIds.length + 10; step++) {
+		const footer = Bun.stripANSI(fallbackHub.render(160).join("\n"));
+		if (footer.includes(addFallbackLabel) && footer.includes(clearChainLabel)) {
+			chainKeyFooter = footer;
+			break;
+		}
+		fallbackHub.handleInput("\x1b[B");
+	}
+	if (!chainKeyFooter) throw new Error("The fallback-chain row is missing its real action footer");
+	if (translationEnabled) {
+		ok(!chainKeyFooter.includes("add fallback"), "the fallback-chain footer must not retain add fallback in English");
+		ok(!chainKeyFooter.includes("clear chain"), "the fallback-chain footer must not retain clear chain in English");
+	}
+	if (nativeDescribeAvailable) {
+		const chainKeyTree = materializeNative(fallbackHub.describe?.(treeContext), treeContext);
+		const chainKeyHints = nativeHintsJson(chainKeyTree);
+		if (!chainKeyHints) throw new Error("The native fallback-chain hints are missing");
+		ok(chainKeyHints.includes(JSON.stringify(addFallbackLabel)), "native fallback-chain hints must translate add fallback");
+	}
+	fallbackHub.handleInput("\x1b[B");
+	fallbackHub.handleInput("\x1b[B");
+	if (nativeDescribeAvailable) {
+		const newFallbackPreview = JSON.stringify(materializeNative(fallbackHub.describe?.(pickerContext), pickerContext));
+		const newFallbackDescription = requiredUiLabel("Pick the model (or provider) a new retry fallback chain protects.");
+		ok(newFallbackPreview.includes(newFallbackDescription), "the native new-fallback preview must translate its instruction");
+	}
+	fallbackHub.handleInput("\r");
+	const newFallbackStatus = requiredUiLabel("New fallback chain — pick the model it protects");
+	const newFallbackStatusAnsi = Bun.stripANSI(fallbackHub.render(160).join("\n"));
+	for (const key of ["New fallback chain", "picks the model it protects"]) {
+		ok(newFallbackStatusAnsi.includes(requiredUiLabel(key)), `the ANSI fallback prompt must translate ${key}:\n${newFallbackStatusAnsi}`);
+	}
+	if (nativeDescribeAvailable) {
+		const newFallbackStatusTree = JSON.stringify(materializeNative(fallbackHub.describe?.(treeContext), treeContext));
+		ok(newFallbackStatusTree.includes(newFallbackStatus), "the native status must translate the new-fallback chain prompt");
+	}
+	strictEqual(counters.configWrites, 0, "navigating assignment and fallback prompts must not persist settings");
+	strictEqual(counters.refreshCalls, 0, "navigating ModelHub action states must not refresh providers");
+
+	if (nativeDescribeAvailable) {
+		const rolePreviewHub = new modelHubModule.ModelHubComponent(
+			fakeTui,
+			settings,
+			registry,
+			[{ model }],
+			callbacks,
+			{ currentSelector: modelSelector },
+		);
+		fixtureHubs.push(rolePreviewHub);
+		rolePreviewHub.handleInput("\x1b[A");
+		rolePreviewHub.handleInput("\r");
+		const customRolePreviewText = requiredUiLabel("Name a custom role, then pick the model it runs on.");
+		let customRolePreview: string | undefined;
+		for (let step = 0; step < knownRoleIds.length + 2; step++) {
+			const preview = JSON.stringify(materializeNative(rolePreviewHub.describe?.(pickerContext), pickerContext));
+			if (preview.includes(customRolePreviewText)) {
+				customRolePreview = preview;
+				break;
+			}
+			rolePreviewHub.handleInput("\x1b[B");
+		}
+		if (!customRolePreview) throw new Error("The native New role preview is missing");
+		ok(customRolePreview.includes(customRolePreviewText), "the real native New role preview must translate its instruction");
+	}
+
 	modelHub.handleInput("\r");
+	const assigningLabel = requiredUiLabel("Assigning");
+	const assigningAnsi = Bun.stripANSI(modelHub.render(160).join("\n"));
+	ok(assigningAnsi.includes(`${assigningLabel} SMOL`), "the real ANSI assignment status must translate its verb");
+	if (translationEnabled) ok(!assigningAnsi.includes("Assigning"), "the ANSI assignment status must not retain its English verb");
+	if (nativeDescribeAvailable) {
+		const assigningTree = JSON.stringify(materializeNative(modelHub.describe?.(treeContext), treeContext));
+		ok(assigningTree.includes(assigningLabel), "the native assignment status must translate its verb");
+	}
 	modelHub.handleInput("\r");
 	modelHub.handleInput("\r");
 	deepStrictEqual(assignmentCaptures, [{ role: "smol", selector: "Models/Roles", provider: "Models", modelId: "Roles" }], "keyboard assignment must preserve role, provider, model, and selector identities");
-	if (translationEnabled && nativeAvailable) {
-		const compactionHub = new modelHubModule.ModelHubComponent(
-			fakeTui,
-			compactionSettings,
-			registry,
-			[{ model }],
-			compactionCallbacks,
-			{ currentSelector: "Models/Roles" },
-		);
-		compactionHub.handleInput("\x1b[A");
-		compactionHub.handleInput("\r");
-		const roleAnsi = Bun.stripANSI(compactionHub.render(160).join("\n"));
+	let compactionAvailable: boolean | undefined;
+	const compactionHub = new modelHubModule.ModelHubComponent(
+		fakeTui,
+		compactionSettings,
+		registry,
+		[{ model }],
+		compactionCallbacks,
+		{ currentSelector: "Models/Roles" },
+	);
+	compactionHub.handleInput("\x1b[A");
+	compactionHub.handleInput("\r");
+	const compactionRoleAnsi = Bun.stripANSI(compactionHub.render(160).join("\n"));
+	const compactionHint = requiredUiLabel("compaction limit");
+	compactionAvailable = compactionRoleAnsi.includes("compaction limit") || compactionRoleAnsi.includes(compactionHint);
+	// Both historical lanes are known not to expose this control; every other selected host must.
+	const compactionExpected = !["18.3.2", "18.4.12"].includes(launch.host.version);
+	if (compactionAvailable !== compactionExpected) {
+		throw new Error(`Unexpected ModelHub compaction capability on ${launch.host.version}: ${compactionAvailable}`);
+	}
+	if (nativeDescribeAvailable) {
 		const roleNativeTree = JSON.stringify(materializeNative(compactionHub.describe?.(treeContext), treeContext));
 		const roleNativePickerValue = materializeNative(compactionHub.describe?.(pickerContext), pickerContext);
 		const roleNativePicker = JSON.stringify(roleNativePickerValue);
@@ -863,41 +1066,38 @@ try {
 		ok(roleSummary.some(item => item.key === thinkingLabel), "the native role preview must translate the Thinking label");
 		strictEqual(roleSummary.find(item => item.key === sourceLabel)?.value, "auto-selected", "the native role source enum value must remain unchanged");
 		strictEqual(roleSummary.find(item => item.key === requiredUiLabel("Role"))?.value, "Default", "the native role name must remain unchanged");
-		const compactionHint = dictionary["compaction limit"];
-		const compactionAction = dictionary["Compaction limit"];
-		if (!compactionHint || compactionHint === "compaction limit") throw new Error("The compaction hint dictionary entry is missing");
-		if (!compactionAction || compactionAction === "Compaction limit") throw new Error("The compaction action dictionary entry is missing");
-		ok(roleAnsi.includes(compactionHint), "the ANSI Roles footer must translate the compaction limit hint");
-		ok(roleNativeTree.includes(compactionHint), "the native Roles footer must translate the compaction limit hint");
-		ok(roleNativePicker.includes(compactionAction), "the native Roles picker must translate the compaction action");
-
+		if (compactionAvailable) {
+			const compactionAction = requiredUiLabel("Compaction limit");
+			ok(roleNativeTree.includes(compactionHint), "the native Roles footer must translate the compaction limit hint");
+			ok(roleNativePicker.includes(compactionAction), "the native Roles picker must translate the compaction action");
+		}
+	}
+	if (compactionAvailable) {
+		ok(compactionRoleAnsi.includes(compactionHint), "the ANSI Roles footer must translate the compaction limit hint");
+		if (translationEnabled) ok(!compactionRoleAnsi.includes("compaction limit"), "the ANSI Roles footer must not retain the compaction hint in English");
 		compactionHub.handleInput("k");
 		const stripAnsi = Bun.stripANSI(compactionHub.render(160).join("\n"));
-		const stripNativeTree = JSON.stringify(materializeNative(compactionHub.describe?.(treeContext), treeContext));
-		const stripNativePicker = JSON.stringify(materializeNative(compactionHub.describe?.(pickerContext), pickerContext));
-		const modelLimit = dictionary["limit:"];
-		const pickerLimit = dictionary[" limit "];
-		const inputHint = dictionary["400k base · f400k fixed · 80% · empty resets"];
-		const footerAction = dictionary["set compaction point"];
-		const pickerAction = dictionary["Set compaction point"];
-		if (!modelLimit || modelLimit === "limit:") throw new Error("The model compaction label dictionary entry is missing");
-		if (!pickerLimit || pickerLimit === " limit ") throw new Error("The native compaction label dictionary entry is missing");
-		if (!inputHint || inputHint === "400k base · f400k fixed · 80% · empty resets") throw new Error("The compaction input hint dictionary entry is missing");
-		if (!footerAction || footerAction === "set compaction point") throw new Error("The compaction footer action dictionary entry is missing");
-		if (!pickerAction || pickerAction === "Set compaction point") throw new Error("The native compaction action dictionary entry is missing");
+		const modelLimit = requiredUiLabel("limit:");
+		const pickerLimit = requiredUiLabel(" limit ");
+		const inputHint = requiredUiLabel("400k base · f400k fixed · 80% · empty resets");
+		const footerAction = requiredUiLabel("set compaction point");
+		const pickerAction = requiredUiLabel("Set compaction point");
 		ok(stripAnsi.includes(`Roles ${modelLimit}`), "the ANSI compaction label must preserve the model ID and translate only its label");
 		ok(stripAnsi.includes(inputHint), "the ANSI compaction input hint must translate");
-
-		// HubFrame replaces the ANSI footer hint with the active strip; native descriptions retain the action hint.
-		ok(stripNativeTree.includes(inputHint), "the native tree compaction input hint must translate");
-		ok(stripNativeTree.includes(footerAction), "the native tree compaction action must translate");
-		ok(stripNativePicker.includes("Roles"), "the native compaction strip must preserve the model ID");
-		ok(stripNativePicker.includes(pickerLimit), "the native compaction strip must translate its fixed label");
-		ok(stripNativePicker.includes(inputHint), "the native picker compaction input hint must translate");
-		ok(stripNativePicker.includes(pickerAction), "the native picker compaction action must translate");
+		if (nativeDescribeAvailable) {
+			const stripNativeTree = JSON.stringify(materializeNative(compactionHub.describe?.(treeContext), treeContext));
+			const stripNativePicker = JSON.stringify(materializeNative(compactionHub.describe?.(pickerContext), pickerContext));
+			// The native tree retains the action hint; the picker exposes its own strip label and action.
+			ok(stripNativeTree.includes(inputHint), "the native tree compaction input hint must translate");
+			ok(stripNativeTree.includes(footerAction), "the native tree compaction action must translate");
+			ok(stripNativePicker.includes("Roles"), "the native compaction strip must preserve the model ID");
+			ok(stripNativePicker.includes(pickerLimit), "the native compaction strip must translate its fixed label");
+			ok(stripNativePicker.includes(inputHint), "the native picker compaction input hint must translate");
+			ok(stripNativePicker.includes(pickerAction), "the native picker compaction action must translate");
+		}
 		deepStrictEqual(compactionChangeCaptures, [], "opening the display-only compaction strip must not persist a change");
-		compactionHub.dispose();
 	}
+	compactionHub.dispose();
 	if (hasPresetUi) {
 		activePreset = undefined;
 		const unassignedPresetHub = new modelHubModule.ModelHubComponent(
@@ -911,7 +1111,7 @@ try {
 		unassignedPresetHub.handleInput("\x1b[A");
 		unassignedPresetHub.handleInput("\r");
 		const unassignedPresetAnsi = Bun.stripANSI(unassignedPresetHub.render(160).join("\n"));
-		const unassignedPresetNative = nativeAvailable
+		const unassignedPresetNative = nativeDescribeAvailable
 			? JSON.stringify(materializeNative(unassignedPresetHub.describe?.(pickerContext), pickerContext))
 			: undefined;
 		if (translationEnabled) {
@@ -936,13 +1136,13 @@ try {
 	cycleHub.handleInput("\x1b[A");
 	cycleHub.handleInput("\r");
 	const cycleAnsi = Bun.stripANSI(cycleHub.render(160).join("\n"));
-	const cyclePickerValue = nativeAvailable ? materializeNative(cycleHub.describe?.(pickerContext), pickerContext) : undefined;
-	const cycleTreeValue = nativeAvailable ? materializeNative(cycleHub.describe?.(treeContext), treeContext) : undefined;
+	const cyclePickerValue = nativeDescribeAvailable ? materializeNative(cycleHub.describe?.(pickerContext), pickerContext) : undefined;
+	const cycleTreeValue = nativeDescribeAvailable ? materializeNative(cycleHub.describe?.(treeContext), treeContext) : undefined;
 	const cyclePickerText = JSON.stringify(cyclePickerValue);
 	const cycleLabel = requiredUiLabel("cycle:");
 	ok(cycleAnsi.includes(cycleLabel), "the ANSI quick-switch hint must translate its fixed label");
 	if (translationEnabled) ok(!cycleAnsi.includes("cycle:"), "the ANSI quick-switch hint must not retain cycle:");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const cycleBadge = localizedText(dictionary, translationEnabled, "cycle {count}", { count: "1" });
 		const cycleTitle = localizedText(dictionary, translationEnabled, "Stop {count} of the quick-switch cycle", { count: "1" });
 		ok(cyclePickerText.includes(cycleBadge), "the native quick-switch cycle badge must translate its count label");
@@ -1011,7 +1211,7 @@ try {
 		const ansi = Bun.stripANSI(hub.render(160).join("\n"));
 		ok(ansi.includes(expected), `the real ANSI provider state must display ${expected}`);
 		if (translationEnabled) ok(!ansi.includes(original), `the real ANSI provider state must not leave ${original} in English`);
-		if (nativeAvailable) {
+		if (nativeDescribeAvailable) {
 			const tree = JSON.stringify(materializeNative(hub.describe?.(treeContext), treeContext));
 			const picker = JSON.stringify(materializeNative(hub.describe?.(pickerContext), pickerContext));
 			ok(tree.includes(expected), `the native provider state must display ${expected}`);
@@ -1041,7 +1241,7 @@ try {
 	const refreshingLabel = requiredUiLabel("refreshing model list…");
 	const refreshingAnsi = Bun.stripANSI(refreshingHub.render(160).join("\n"));
 	ok(refreshingAnsi.includes(`${diagnosticProviderId} · ${refreshingLabel}`), "the provider refresh status must translate its fixed suffix");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const refreshingTree = JSON.stringify(materializeNative(refreshingHub.describe?.(treeContext), treeContext));
 		const refreshingPicker = JSON.stringify(materializeNative(refreshingHub.describe?.(pickerContext), pickerContext));
 		ok(refreshingTree.includes(`${diagnosticProviderId} · ${refreshingLabel}`), "the native provider refresh status must translate its fixed suffix");
@@ -1069,7 +1269,7 @@ try {
 		fixtureHubs.push(errorHub);
 		// This diagnostic exceeds the 160-column content pane; inspect it without UI clipping.
 		ok(Bun.stripANSI(errorHub.render(320).join("\n")).includes(expected), "provider endpoint diagnostics must remain unchanged");
-		if (nativeAvailable) {
+		if (nativeDescribeAvailable) {
 			const tree = JSON.stringify(materializeNative(errorHub.describe?.(treeContext), treeContext));
 			const picker = JSON.stringify(materializeNative(errorHub.describe?.(pickerContext), pickerContext));
 			ok(tree.includes(expected), "native provider endpoint diagnostics must remain unchanged");
@@ -1106,7 +1306,7 @@ try {
 	ok(lockedAnsi.includes(apiKeyText), "the API-key setup instruction must translate");
 	ok(lockedAnsi.includes(catalogAnsiCount), "the ANSI catalog count must translate while preserving its count and colon");
 	ok(lockedAnsi.includes(lockedModel.id), "the locked provider catalog model ID must remain unchanged");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const lockedTree = JSON.stringify(materializeNative(lockedHub.describe?.(treeContext), treeContext));
 		const lockedPickerValue = materializeNative(lockedHub.describe?.(pickerContext), pickerContext);
 		const lockedPicker = JSON.stringify(lockedPickerValue);
@@ -1142,7 +1342,7 @@ try {
 	const environmentSignInText = localizedText(dictionary, translationEnabled, "Set {envVars} to sign in", { envVars: environmentValues });
 	ok(environmentAnsi.includes(environmentSetupText), "the ANSI environment setup instruction must translate without changing variable names");
 	for (const name of environmentVariables) ok(environmentAnsi.includes(name), `environment variable ${name} must remain unchanged`);
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const environmentTree = JSON.stringify(materializeNative(environmentHub.describe?.(treeContext), treeContext));
 		const environmentPickerValue = materializeNative(environmentHub.describe?.(pickerContext), pickerContext);
 		const environmentPicker = JSON.stringify(environmentPickerValue);
@@ -1174,7 +1374,7 @@ try {
 	const oauthAnsi = Bun.stripANSI(oauthHub.render(160).join("\n"));
 	const oauthInstructions = requiredUiLabel("Log in with OAuth");
 	ok(oauthAnsi.includes(oauthInstructions), "the ANSI OAuth login action must translate");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const oauthTree = JSON.stringify(materializeNative(oauthHub.describe?.(treeContext), treeContext));
 		const oauthPickerValue = materializeNative(oauthHub.describe?.(pickerContext), pickerContext);
 		const oauthPicker = JSON.stringify(oauthPickerValue);
@@ -1194,7 +1394,7 @@ try {
 		strictEqual(counters.loginRequests, 1, "the native login action must dispatch through the supplied callback");
 	}
 
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		if (!closeAction || !modelHub.handleNativeEvent || !sharedCloseAction || !sharedCloseActionSnapshot) throw new Error("The native ModelHub close route is missing");
 		strictEqual(callbacks.onCancel, cancelModelHub, "ModelHub must preserve the supplied cancel callback identity");
 		// The previous hub has an assignment strip; its first Close correctly dismisses that strip.
@@ -1212,16 +1412,16 @@ try {
 		authenticatedProviders: [diagnosticProviderId],
 		discoveryStates: new Map([[diagnosticProviderId, { optional: false, status: "ok" }]]),
 	});
-	const fallbackHub = new modelHubModule.ModelHubComponent(fakeTui, settings, fallbackRegistry, [], callbacks, { initialProviderId: diagnosticProviderId });
-	fixtureHubs.push(fallbackHub);
-	if (nativeAvailable) {
-		const fallbackPickerValue = materializeNative(fallbackHub.describe?.(pickerContext), pickerContext);
+	const providerFallbackHub = new modelHubModule.ModelHubComponent(fakeTui, settings, fallbackRegistry, [], callbacks, { initialProviderId: diagnosticProviderId });
+	fixtureHubs.push(providerFallbackHub);
+	if (nativeDescribeAvailable) {
+		const fallbackPickerValue = materializeNative(providerFallbackHub.describe?.(pickerContext), pickerContext);
 		const fallbackEmptyKey = "No models from {provider} yet";
 		requiredUiLabel(fallbackEmptyKey);
 		const fallbackEmptyText = localizedText(dictionary, translationEnabled, fallbackEmptyKey, { provider: diagnosticProviderId });
 		strictEqual(nativePickerProps(fallbackPickerValue)?.empty, fallbackEmptyText, "the native picker provider-empty fallback must translate without changing the provider ID");
 	}
-	fallbackHub.dispose();
+	providerFallbackHub.dispose();
 	fixtureHubs.pop();
 
 	const countProviderId = "not configured";
@@ -1276,7 +1476,7 @@ try {
 	const countStatus = localizedText(dictionary, translationEnabled, "{count} models", { count: "1" });
 	const countAnsi = Bun.stripANSI(countHub.render(160).join("\n"));
 	ok(countAnsi.includes(`${countProviderId} · ${countStatus}`), "the settled provider count status must translate wording without changing provider or count");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const countTree = JSON.stringify(materializeNative(countHub.describe?.(treeContext), treeContext));
 		const countPickerValue = materializeNative(countHub.describe?.(pickerContext), pickerContext);
 		const countPickerScope = nativePickerScopes(countPickerValue)?.find(scope => scope.id === `provider:${countProviderId}`);
@@ -1295,7 +1495,7 @@ try {
 	ok(emptyAnsi.includes(expectedEmptyState), `the real ANSI empty state must display ${expectedEmptyState}`);
 	assertWidth(emptyHub.render(160), 160, textUtils.visibleWidth, "normal empty view");
 	assertWidth(emptyHub.render(80), 80, textUtils.visibleWidth, "narrow empty view");
-	if (nativeAvailable) {
+	if (nativeDescribeAvailable) {
 		const emptyNativeTree = JSON.stringify(materializeNative(emptyHub.describe?.(treeContext), treeContext));
 		const emptyNativePicker = JSON.stringify(materializeNative(emptyHub.describe?.(pickerContext), pickerContext));
 		ok(emptyNativeTree.includes(expectedEmptyState), "native component description must expose the empty state");
@@ -1319,8 +1519,9 @@ try {
 		model: "Models/Roles",
 		assignment: assignmentCaptures[0],
 		emptyState: expectedEmptyState,
-		keyboard: { selectedBefore: selectedRoleBefore, selectedAfter: selectedRoleAfter, nativeShortcuts: nativeAvailable },
-		nativeDescribe: `${nativeAvailable ? "covered" : "unavailable"}@${launch.host.version}`,
+		keyboard: { selectedBefore: selectedRoleBefore, selectedAfter: selectedRoleAfter, nativeShortcuts: nativeDescribeAvailable },
+		nativeDescribe: `${nativeDescribeAvailable ? "covered" : "unavailable"}@${launch.host.version}`,
+		compactionCapability: `${compactionAvailable === undefined ? "unprobed" : compactionAvailable ? "covered" : "unavailable"}@${launch.host.version}`,
 		injectionSideEffect,
 		widthCells: [80, 160],
 		fixture: "isolated display data; fake registry has no network/model API; read-only settings; configWrites=0",
