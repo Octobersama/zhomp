@@ -142,6 +142,8 @@ export const MODEL_HUB_TEXT_KEYS = [
 	"Provider requires authentication before models can be discovered.",
 	"Provider has not been refreshed yet.",
 	"Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.",
+	"less than a minute ago",
+	"{count}m ago",
 	"Using cached model list from {age}. Live refresh is still pending.",
 	"Using cached model list. Live refresh is still pending.",
 	"Provider unavailable. Using cached model list from {age}.",

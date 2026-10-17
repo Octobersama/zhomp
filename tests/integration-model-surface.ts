@@ -456,8 +456,16 @@ const modelUiPath = join(installDir, "model-ui.ts");
 if (!existsSync(modelUiPath)) throw new Error(`Installed ModelHub translator is missing: ${modelUiPath}`);
 const shippedDictionary = dictionaryFromFile(launch.dictPath);
 const hostileTitle = "模型'\"; globalThis.__zhompModelUiInjected = true; // $& $` $' ${notCode} \\";
+const hostileShortAge = `"x";globalThis.__zhompModelUiInjected=true;//$&`;
+const hostileAge = `{count} 分钟前";globalThis.__zhompModelUiInjected=true;//$&`;
 const dictionary = mode === "hostile"
-	? { ...shippedDictionary, Models: hostileTitle, "All available models": hostileTitle }
+	? {
+		...shippedDictionary,
+		Models: hostileTitle,
+		"All available models": hostileTitle,
+		"less than a minute ago": hostileShortAge,
+		"{count}m ago": hostileAge,
+	}
 	: shippedDictionary;
 const dictionaryPath = mode === "hostile" ? join(probeRoot, "model-ui-hostile-dictionary.json") : launch.dictPath;
 if (mode === "hostile") writeFileSync(dictionaryPath, JSON.stringify(dictionary), "utf8");
@@ -1178,19 +1186,65 @@ try {
 	ok(scrolledOverflowAnsi.includes(`↓ ${localizedText(dictionary, translationEnabled, "{count} more", { count: scrolledBelowCount })}`), "the hidden-below count must translate and remain intact");
 
 	const diagnosticProviderId = "diagnostic-provider";
-	const ageStamp = Date.now() + 60_000;
-	const ageText = "less than a minute ago";
-	const providerStateCases: readonly { state: ProviderDiscoveryState; key: string; values?: Readonly<Record<string, string>> }[] = [
+	const discoveryNow = 1_700_000_000_000;
+	type ProviderStateCase = {
+		state: ProviderDiscoveryState;
+		key: string;
+		ageKey?: string;
+		ageValues?: Readonly<Record<string, string>>;
+	};
+	const providerStateCases: readonly ProviderStateCase[] = [
 		{ state: { optional: false, status: "idle" }, key: "Provider has not been refreshed yet." },
 		{ state: { optional: false, status: "unauthenticated" }, key: "Provider requires authentication before models can be discovered." },
 		{ state: { optional: false, status: "empty" }, key: "Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }." },
-		{ state: { optional: false, status: "cached", fetchedAt: ageStamp }, key: "Using cached model list from {age}. Live refresh is still pending.", values: { age: ageText } },
+		{
+			state: { optional: false, status: "cached", fetchedAt: discoveryNow - 59_999 },
+			key: "Using cached model list from {age}. Live refresh is still pending.",
+			ageKey: "less than a minute ago",
+		},
+		{
+			state: { optional: false, status: "cached", fetchedAt: discoveryNow - 60_000 },
+			key: "Using cached model list from {age}. Live refresh is still pending.",
+			ageKey: "{count}m ago",
+			ageValues: { count: "1" },
+		},
+		{
+			state: { optional: false, status: "cached", fetchedAt: discoveryNow - 89_999 },
+			key: "Using cached model list from {age}. Live refresh is still pending.",
+			ageKey: "{count}m ago",
+			ageValues: { count: "1" },
+		},
+		{
+			state: { optional: false, status: "cached", fetchedAt: discoveryNow - 90_000 },
+			key: "Using cached model list from {age}. Live refresh is still pending.",
+			ageKey: "{count}m ago",
+			ageValues: { count: "2" },
+		},
 		{ state: { optional: false, status: "cached" }, key: "Using cached model list. Live refresh is still pending." },
-		{ state: { optional: false, status: "unavailable", fetchedAt: ageStamp }, key: "Provider unavailable. Using cached model list from {age}.", values: { age: ageText } },
+		{
+			state: { optional: false, status: "unavailable", fetchedAt: discoveryNow + 1_000 },
+			key: "Provider unavailable. Using cached model list from {age}.",
+			ageKey: "less than a minute ago",
+		},
+		{
+			state: { optional: false, status: "unavailable", fetchedAt: discoveryNow - 60_000 },
+			key: "Provider unavailable. Using cached model list from {age}.",
+			ageKey: "{count}m ago",
+			ageValues: { count: "1" },
+		},
+		{
+			state: { optional: false, status: "unavailable", fetchedAt: discoveryNow - 90_000 },
+			key: "Provider unavailable. Using cached model list from {age}.",
+			ageKey: "{count}m ago",
+			ageValues: { count: "2" },
+		},
 		{ state: { optional: false, status: "unavailable" }, key: "Provider unavailable." },
 	];
-	function assertProviderState(fixture: { state: ProviderDiscoveryState; key: string; values?: Readonly<Record<string, string>> }): void {
-		if (translationEnabled) requiredUiLabel(fixture.key);
+	function assertProviderState(fixture: ProviderStateCase): void {
+		if (translationEnabled) {
+			requiredUiLabel(fixture.key);
+			if (fixture.ageKey) requiredUiLabel(fixture.ageKey);
+		}
 		const stateRegistry = createProviderRegistry(counters, {
 			providers: [diagnosticProviderId],
 			authenticatedProviders: [diagnosticProviderId],
@@ -1205,24 +1259,50 @@ try {
 			{ initialProviderId: diagnosticProviderId },
 		);
 		fixtureHubs.push(hub);
-		const values = fixture.values ?? {};
+		const age = fixture.ageKey
+			? localizedText(dictionary, translationEnabled, fixture.ageKey, fixture.ageValues)
+			: undefined;
+		const sourceAge = fixture.ageKey
+			? localizedText(dictionary, false, fixture.ageKey, fixture.ageValues)
+			: undefined;
+		const values: Readonly<Record<string, string>> = age === undefined ? {} : { age };
+		const sourceValues: Readonly<Record<string, string>> = sourceAge === undefined ? {} : { age: sourceAge };
 		const expected = localizedText(dictionary, translationEnabled, fixture.key, values);
-		const original = localizedText(dictionary, false, fixture.key, values);
+		const original = localizedText(dictionary, false, fixture.key, sourceValues);
 		const ansi = Bun.stripANSI(hub.render(160).join("\n"));
 		ok(ansi.includes(expected), `the real ANSI provider state must display ${expected}`);
+		ok(ansi.includes(diagnosticProviderId), "the ANSI provider state must preserve its provider ID");
+		if (age !== undefined) ok(ansi.includes(age), `the real ANSI provider age must display ${age}`);
 		if (translationEnabled) ok(!ansi.includes(original), `the real ANSI provider state must not leave ${original} in English`);
 		if (nativeDescribeAvailable) {
 			const tree = JSON.stringify(materializeNative(hub.describe?.(treeContext), treeContext));
 			const picker = JSON.stringify(materializeNative(hub.describe?.(pickerContext), pickerContext));
-			ok(tree.includes(expected), `the native provider state must display ${expected}`);
-			ok(picker.includes(expected), `the native picker provider state must display ${expected}`);
+			const serializedExpected = JSON.stringify(expected).slice(1, -1);
+			ok(tree.includes(serializedExpected), `the native provider state must display ${expected}`);
+			ok(picker.includes(serializedExpected), `the native picker provider state must display ${expected}`);
+			ok(tree.includes(diagnosticProviderId), "the native provider state must preserve its provider ID");
+			ok(picker.includes(diagnosticProviderId), "the native picker provider state must preserve its provider ID");
+			if (age !== undefined) {
+				const serializedAge = JSON.stringify(age).slice(1, -1);
+				ok(tree.includes(serializedAge), `the native provider age must display ${age}`);
+				ok(picker.includes(serializedAge), `the native picker provider age must display ${age}`);
+			}
 			if (translationEnabled) {
 				ok(!tree.includes(original), `the native provider state must not leave ${original} in English`);
 				ok(!picker.includes(original), `the native picker provider state must not leave ${original} in English`);
 			}
 		}
 	}
-	for (const fixture of providerStateCases) assertProviderState(fixture);
+	const originalDateNow = Date.now;
+	Date.now = () => discoveryNow;
+	try {
+		for (const fixture of providerStateCases) assertProviderState(fixture);
+	} finally {
+		Date.now = originalDateNow;
+	}
+	if (mode === "hostile") {
+		strictEqual(Reflect.get(globalThis, "__zhompModelUiInjected"), undefined, "hostile discovery-age text must remain literal");
+	}
 
 	const refreshingRegistry = createProviderRegistry(counters, {
 		providers: [diagnosticProviderId],

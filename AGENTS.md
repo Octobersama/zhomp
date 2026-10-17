@@ -5,14 +5,14 @@ zhomp 提供非破坏性、可卸载的 OMP 中文设置界面。安装、升级
 ## 宿主与模块身份
 
 - 支持范围的唯一程序真源是 `package.json.peerDependencies["@oh-my-pi/pi-coding-agent"]`，当前为下限范围；安装验证宿主包身份与显示接口，启动与翻译验证实际安装版本及对象形状。扩大范围必须验证实际消费链，不能只改文档。
-- 宿主 UI 来源是 `config/all-settings.ts` 的 `orderedSettings()` 返回对象；实际 `settings-ui.ts` 在打开面板时读取 `setting.ui`。tab/group 来源是宿主实际解析到的 pi-tui `overlays/settings-defs`。
+- 宿主 UI 来源是 `config/all-settings.ts` 的 `orderedSettings()` 返回对象；实际 `settings-ui.ts` 在打开面板时读取 `setting.ui`。tab/group 及可选的 `TAB_LEADS` 原生页面导语来源是宿主实际解析到的 pi-tui `overlays/settings-defs`。
 - 用安装器解析并验证后的绝对包路径动态导入。禁止通过仓库裸包导入得到另一个 Bun cache 模块实例。
 - `src/cli.ts` 保留为真正的 Bun 主入口；preload 在宿主初始化前恢复项目 cwd。worker 子进程必须仍能进入官方主入口。
 - 扩展 factory 保持 async，并要求 `OMP_ZH_ENABLED` 精确为 `1`、授权 PID 等于当前进程；普通官方命令不因发现扩展或继承其他进程标记而汉化。
 
 ## 翻译不变量
 
-- `/settings` 仅修改 `ui.label/description/warning/group`、`options[].label/description`、tab label 和 group 文本。
+- `/settings` 仅修改 `ui.label/description/warning/group`、`options[].label/description`、tab label、group 文本及可选的 `TAB_LEADS` 原生页面导语；旧宿主缺少导语时不影响已有翻译。
 - 配置 id、tab id、option.value、default、enum 和函数身份保持不变。group 数组就地改写，和 UI group 名称一致。
 - 最小接口与入口类型守卫足够；不引入完整宿主类型耦合，不使用 `any` / `as any`，不泛化为递归翻译任意字符串。
 - 日志前缀 `[zhomp]`。字典无效时安全跳过，未命中原文保持不变；计数日志不能代替实际界面验证。

@@ -18,6 +18,7 @@ type SettingsDefsModule = {
 	SETTING_TABS: readonly string[];
 	TAB_METADATA: Record<string, { label: string }>;
 	TAB_GROUPS: Record<string, readonly string[]>;
+	TAB_LEADS?: Record<string, string>;
 };
 
 type SettingsDisplaySnapshot = {
@@ -57,7 +58,7 @@ void (async () => {
 	}));
 	process.stdout.write(JSON.stringify({
 		entries,
-		defs: { SETTING_TABS: defs.SETTING_TABS, TAB_METADATA: defs.TAB_METADATA, TAB_GROUPS: defs.TAB_GROUPS },
+		defs: { SETTING_TABS: defs.SETTING_TABS, TAB_METADATA: defs.TAB_METADATA, TAB_GROUPS: defs.TAB_GROUPS, TAB_LEADS: defs.TAB_LEADS },
 	}));
 })().catch(error => {
 	console.error(error);
@@ -107,6 +108,9 @@ function collectDisplayFields(
 	}
 	for (const [tab, groups] of Object.entries(defs.TAB_GROUPS)) {
 		for (const [index, group] of groups.entries()) addField(fields, group, `TAB_GROUPS.${tab}[${index}]`);
+	}
+	if (defs.TAB_LEADS) {
+		for (const [tab, lead] of Object.entries(defs.TAB_LEADS)) addField(fields, lead, `TAB_LEADS.${tab}`);
 	}
 	return fields;
 }

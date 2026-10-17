@@ -115,6 +115,49 @@ describe("translation boundary", () => {
 		strictEqual(validate("still same function"), true);
 	});
 
+	test("translates optional native page leads in place without changing tab IDs", () => {
+		const { host, setting } = createFixture();
+		const tabLeads = { appearance: "Appearance lead" };
+		const hostWithLeads = { ...host, tabLeads };
+		const tabMetadata = host.tabMetadata;
+
+		translateSettings(hostWithLeads, {
+			appearance: "页签编号",
+			"Appearance lead": "外观简介",
+		});
+
+		strictEqual(tabLeads.appearance, "外观简介");
+		strictEqual(hostWithLeads.tabLeads, tabLeads);
+		strictEqual(hostWithLeads.tabMetadata, tabMetadata);
+		strictEqual(setting.ui.tab, "appearance");
+		strictEqual(setting.id, "appearance.theme");
+		deepStrictEqual(Object.keys(tabLeads), ["appearance"]);
+	});
+
+	test("accepts older host metadata without optional tab leads", () => {
+		const { host, setting } = createFixture();
+
+		translateSettings(host, { Theme: "主题" });
+
+		strictEqual(setting.ui.label, "主题");
+	});
+
+	test("rejects malformed optional tab leads before mutating settings metadata", () => {
+		const { host, setting, groupList } = createFixture();
+		const tabLeads = { appearance: 7 };
+		const hostWithInvalidLeads = { ...host, tabLeads };
+
+		throws(() => translateSettings(hostWithInvalidLeads, {
+			Appearance: "外观",
+			General: "通用",
+			"Appearance lead": "外观简介",
+		}));
+
+		strictEqual(setting.ui.label, "Theme");
+		strictEqual(groupList[0], "General");
+		strictEqual(tabLeads.appearance, 7);
+	});
+
 	test("keeps a shared group name consistent and is idempotent", () => {
 		const { host, setting, groupList } = createFixture();
 		const dictionary = { General: "通用", Theme: "主题", "Choose a theme": "选择主题" };

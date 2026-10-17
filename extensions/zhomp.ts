@@ -181,8 +181,8 @@ export interface TranslationHost {
 	orderedSettings: () => readonly unknown[];
 	tabMetadata: unknown;
 	tabGroups: unknown;
+	tabLeads?: unknown;
 }
-
 
 function isRecord(value: unknown): value is ObjectRecord {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -320,6 +320,7 @@ async function loadHost(hostPackage: HostPackage): Promise<LoadedHost> {
 		orderedSettings: allSettings.orderedSettings,
 		tabMetadata: settingsDefs.TAB_METADATA,
 		tabGroups: settingsDefs.TAB_GROUPS,
+		tabLeads: settingsDefs.TAB_LEADS,
 		builtinSlashCommandDefs: slashCommands.BUILTIN_SLASH_COMMAND_DEFS,
 		version: hostPackage.version,
 	};
@@ -508,6 +509,19 @@ function prepareSettingsTranslation(host: TranslationHost, dictionary: Dictionar
 	if (metadataKeys.length !== groupKeys.length || metadataKeys.some(key => !hasOwn(rawGroups, key))) {
 		invalidHost("TAB_METADATA and TAB_GROUPS must contain the same tabs");
 	}
+	let tabLeads: ObjectRecord | undefined;
+	const rawTabLeads = host.tabLeads;
+	if (rawTabLeads !== undefined) {
+		if (!isRecord(rawTabLeads)) invalidHost("TAB_LEADS must be an object");
+		const leadKeys = Object.keys(rawTabLeads);
+		if (leadKeys.length !== metadataKeys.length || metadataKeys.some(key => !hasOwn(rawTabLeads, key))) {
+			invalidHost("TAB_LEADS and TAB_METADATA must contain the same tabs");
+		}
+		for (const key of metadataKeys) {
+			if (typeof rawTabLeads[key] !== "string") invalidHost(`TAB_LEADS.${key} must be a string`);
+		}
+		tabLeads = rawTabLeads;
+	}
 
 	const changes: TranslationChange[] = [];
 	const preparedFields = new WeakMap<object, Set<string>>();
@@ -521,6 +535,7 @@ function prepareSettingsTranslation(host: TranslationHost, dictionary: Dictionar
 			invalidHost(`TAB_METADATA.${key} has an invalid shape`);
 		}
 		prepareMetadataField(tab, "label", label, dictionary, changes, preparedFields);
+		if (tabLeads) prepareMetadataField(tabLeads, key, tabLeads[key], dictionary, changes, preparedFields);
 		const groups = rawGroups[key];
 		if (!isStringArray(groups)) invalidHost(`TAB_GROUPS.${key} must be a string array`);
 		Object.defineProperty(tabGroups, key, { value: groups, enumerable: true });

@@ -2,6 +2,8 @@
 
 ## 未发布
 
+- 补齐 OMP 18.12.0 原生设置页的十条栏目导语：从选定宿主的 `TAB_LEADS` 就地翻译显示值，沿用设置元数据的完整 prepare／统一 apply；tab id、对象身份及旧宿主缺少导语时的兼容性保持不变。字典覆盖及真实 SettingsSelector native prefs 验收同步覆盖导语。
+- 补齐 ModelHub 缓存状态中的“不到一分钟前”和“{数量} 分钟前”，保留宿主的时间边界、未来时间归零与分钟四舍五入行为。精确源码锚点不匹配仍安全跳过；真实 ANSI/native 消费验收覆盖分钟边界及恶意字典字面值，不扩大详细 provider 错误的翻译范围。
 - Model 固定文案目录集中到 `runtime/model-text.ts`，补齐 12 个活跃键并检查随包字典完整性、首尾空格和插值占位符；自定义字典缺键仍保留原文。ANSI `assign roles` 使用整句翻译，native 回退赋值状态不再错误依赖预设功能。
 - 恢复 OMP 18.3.2 OAuth 提示 `(Enter)` 的有限精确源码形状；将 native 描述与压缩限制能力分别验收。设置验收保留静态原始按键及 template-first 优先级，旧宿主不依赖不存在的 key-hint-format 模块。
 - 补齐 OMP 18.11.3 的自动 Prewalk、隔离子代理与 `/seance` 固定文案，以及历史 `/prewalk` 和 macOS 词典补全说明；Apple 等专有名词保持原文。

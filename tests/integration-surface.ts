@@ -322,6 +322,10 @@ try {
 	await settingsModule.Settings.init({ cwd: root, agentDir: root, inMemory: true, readOnly: true });
 	const defs = await import(pathToFileURL(host.settingsDefsPath).href);
 	const theme = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-tui/theme/theme", host.packageDir)).href) as ThemeModule;
+	const settingTabIdsBefore = [...defs.SETTING_TABS] as string[];
+	const nativeTabLeads = defs.TAB_LEADS as Record<string, string> | undefined;
+	const nativeTabLeadsBefore = nativeTabLeads ? { ...nativeTabLeads } : undefined;
+	const nativeTabLeadKeysBefore = nativeTabLeads ? Object.keys(nativeTabLeads) : undefined;
 	theme.initThemeSync("unicode");
 	const dark = settings.find(setting => setting.ui?.label === "Dark Theme");
 	if (!dark) throw new Error("real settings registry is missing Dark Theme metadata");
@@ -377,10 +381,16 @@ try {
 		strictEqual(description.ui.description, description.source, `mismatched PID must preserve ${description.path} description`);
 	}
 	strictEqual(tuiGoal.description, goalDescription, "a mismatched PID must keep canonical slash descriptions in English");
+	strictEqual(defs.TAB_LEADS, nativeTabLeads, "a mismatched PID must leave native page leads untouched");
+	deepStrictEqual(defs.SETTING_TABS, settingTabIdsBefore, "a mismatched PID must leave native tab IDs untouched");
+	if (nativeTabLeadsBefore) deepStrictEqual(nativeTabLeads, nativeTabLeadsBefore);
 	process.env.OMP_ZH_PROCESS_ID = String(process.pid);
 	const translatedLoad = await loader.loadExtensions([extensionPath], root);
 	deepStrictEqual(translatedLoad.errors, [], "real extension loader must bind the installed extension");
 	strictEqual(translatedLoad.extensions.length, 1);
+	strictEqual(defs.TAB_LEADS, nativeTabLeads, "translation must preserve the selected host lead map identity");
+	deepStrictEqual(defs.SETTING_TABS, settingTabIdsBefore, "translation must preserve native tab IDs");
+	if (nativeTabLeads && nativeTabLeadKeysBefore) deepStrictEqual(Object.keys(nativeTabLeads), nativeTabLeadKeysBefore);
 	const ui = await import(pathToFileURL(host.settingsUiPath).href) as SettingsUiModule;
 	const expectedOverrideDescription = `${dictionary[loopGuardSourceDescription] ?? loopGuardSourceDescription} ${renderDictionaryTemplate(dictionary, overrideEnvNoteTemplate, { envName: overrideEnvName })}`;
 	const expectedFallbackDescription = `${dictionary[searchEndpointSourceDescription] ?? searchEndpointSourceDescription} ${renderDictionaryTemplate(dictionary, fallbackEnvNoteTemplate, { envName: fallbackEnvName })}`;
@@ -589,6 +599,38 @@ try {
 	const rendered = component.render(160).map((line: string) => Bun.stripANSI(line)).join("\n");
 	writeFileSync(join(root, "settings-render.txt"), rendered);
 	ok(rendered.includes("外观"), "real tab bar must contain translated Appearance");
+	if (nativeTabLeadsBefore) {
+		const describeContext = {
+			cols: 160,
+			reduceMotion: false,
+			dark: false,
+			supports: (kind: string) => kind === "prefs",
+			feature: () => false,
+		};
+		for (let index = 0; index < settingTabIdsBefore.length; index++) {
+			if (index > 0) component.handleInput(String.fromCharCode(27) + "[C");
+			const described = component.describe(describeContext) as {
+				k: string;
+				p?: { page?: string; lead?: string; pages?: readonly { id: string }[] };
+			};
+			if (described.k !== "prefs" || !described.p) throw new Error("The native SettingsSelector must describe a prefs page");
+			const tabId = settingTabIdsBefore[index];
+			if (tabId === undefined) throw new Error("The native settings tab list changed while describing leads");
+			const sourceLead: string | undefined = nativeTabLeadsBefore[tabId];
+			if (typeof sourceLead !== "string") throw new Error(`Missing selected-host settings lead: ${tabId}`);
+			const translatedLead: string | undefined = dictionary[sourceLead];
+			if (typeof translatedLead !== "string" || translatedLead.length === 0 || translatedLead === sourceLead) {
+				throw new Error(`Missing settings lead translation: ${tabId}`);
+			}
+			strictEqual(described.p.page, tabId, `${tabId} must retain its native page ID`);
+			strictEqual(described.p.lead, translatedLead, `${tabId} native prefs lead`);
+			deepStrictEqual(
+				described.p.pages?.slice(0, settingTabIdsBefore.length).map(page => page.id),
+				settingTabIdsBefore,
+				"native prefs page IDs must remain unchanged",
+			);
+		}
+	}
 	ok(rendered.includes("深色主题"), "real settings list must contain translated Dark Theme");
 	console.log(JSON.stringify({
 		entries: after.entries.length,

@@ -248,6 +248,16 @@ const PROVIDER_DISCOVERY_PATCHES: readonly ExactPatch[] = [
 		after: 'return `  ${__zhompModelHubText("Discovery succeeded but returned 0 models. Check that /models returns { data: [{ id }] }.")}`;',
 		count: 1,
 	},
+	{
+		before: 'if (ageMs < 60_000) return "less than a minute ago";',
+		after: 'if (ageMs < 60_000) return __zhompModelHubText("less than a minute ago");',
+		count: 1,
+	},
+	{
+		before: 'return `${Math.round(ageMs / 60_000)}m ago`;',
+		after: 'return __zhompModelHubText("{count}m ago", { count: String(Math.round(ageMs / 60_000)) });',
+		count: 1,
+	},
 ];
 
 const PROVIDER_ANSI_STATUS_PATCHES: readonly ExactPatch[] = [
