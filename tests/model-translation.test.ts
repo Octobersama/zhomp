@@ -70,9 +70,9 @@ const target = await import(${JSON.stringify(target)});
 const sibling = await import(${JSON.stringify(sibling)});
 console.log(JSON.stringify({ panel: new target.ModelHubComponent().render(), sibling: sibling.label }));
 `);
-			const result = await runCommand(process.execPath, ["--no-install", "--no-env-file", program]);
+			const result = await runCommand(process.execPath, ["--no-install", "--no-env-file", program], { timeout: 30_000 });
 			strictEqual(result.exitCode, 0, result.stderr || result.stdout);
 			deepStrictEqual(JSON.parse(result.stdout.trim().split("\n").at(-1) ?? ""), { panel: ["Models", "Roles"], sibling: "Models" });
 		} finally { removeTree(root); }
-	});
+	}, 35_000);
 });

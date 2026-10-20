@@ -97,6 +97,9 @@ interface ModelRuntimeFixture {
 		session: {
 			model: { provider: string; id: string } | null;
 		};
+		viewSession: {
+			model: { provider: string; id: string } | null;
+		};
 	};
 }
 
@@ -524,12 +527,13 @@ describe("builtin slash description translation", () => {
 		);
 	});
 
-	test("native static detail translates while a real model-state callback stays intact", async () => {
+	test("native static detail translates while the real model-state callback stays live", async () => {
+		// The minimum host reads ctx.session.model; newer hosts read ctx.viewSession.model.
+		// Without a focused session, both host fields refer to the same live session.
+		const session = { model: { provider: "test-provider", id: "test-model" } };
+		const runtime: ModelRuntimeFixture = { ctx: { session, viewSession: session } };
 		const { registry, autocomplete } = await loadHostAutocomplete();
-		// The real /model callback reads only ctx.session.model; this fixture never invokes a handler.
-		const runtime: ModelRuntimeFixture = {
-			ctx: { session: { model: { provider: "test-provider", id: "test-model" } } },
-		};
+		// Build only the real command's autocomplete callback; its handler never runs.
 		const model = registry.buildTuiBuiltinSlashCommands(runtime).find(command => command.name === "model");
 		const modelDefinition = registry.BUILTIN_SLASH_COMMAND_DEFS.find(command => command.name === "model");
 		if (!model || !modelDefinition) throw new Error("The host did not expose its real /model command");
@@ -550,6 +554,22 @@ describe("builtin slash description translation", () => {
 			strictEqual(baseRow.nativeDetail, modelDefinition.description, "the host's native detail is the canonical static description");
 			strictEqual(translatedRow.nativeDetail, dictionary[modelDefinition.description]);
 			strictEqual(translatedRow.state, "test-provider/test-model");
+		}
+
+		session.model = { provider: "updated-provider", id: "updated-model" };
+		const updatedBase = resultOrThrow(await provider.getSuggestions([input], 0, input.length), "updated live /model state");
+		const updatedTranslated = resultOrThrow(await wrapped.getSuggestions([input], 0, input.length), "wrapped updated live /model state");
+		assertSameSelection(updatedBase, updatedTranslated);
+		const updatedBaseRow = rowOrThrow(updatedBase, "model", "updated /model live state");
+		const updatedTranslatedRow = rowOrThrow(updatedTranslated, "model", "wrapped updated /model live state");
+		strictEqual(updatedBaseRow.description, "Model: updated-provider/updated-model");
+		strictEqual(updatedTranslatedRow.description, updatedBaseRow.description, "the wrapped callback keeps reading live model state");
+		if (updatedBaseRow.nativeDetail === undefined) {
+			strictEqual(updatedTranslatedRow.nativeDetail, undefined, "hosts without native detail must not acquire one");
+		} else {
+			strictEqual(updatedBaseRow.nativeDetail, modelDefinition.description);
+			strictEqual(updatedTranslatedRow.nativeDetail, dictionary[modelDefinition.description]);
+			strictEqual(updatedTranslatedRow.state, "updated-provider/updated-model");
 		}
 		strictEqual(modelDefinition.description, "Switch model for this session", "wrapping the live item leaves the canonical model description intact");
 	});
