@@ -474,10 +474,12 @@ describe("builtin slash description translation", () => {
 			"wrapped /annotate argument completions",
 		);
 		assertSameSelection(baseAnnotateArgs, translatedAnnotateArgs);
+		const codeReviewSource = rowOrThrow(baseAnnotateArgs, "code-review ", "/annotate code-review").description;
+		if (typeof codeReviewSource !== "string") throw new Error("The real host /annotate code-review completion has no description");
 		for (const [value, key] of [
 			["last ", "Annotate the latest assistant reply"],
 			["session ", "Annotate a message or code block from this session"],
-			["code-review ", "Annotate local changes or a GitHub pull request"],
+			["code-review ", codeReviewSource],
 			["./", "Annotate a file by path"],
 			['"', "Annotate literal prompt text"],
 		] as const) {
@@ -494,6 +496,47 @@ describe("builtin slash description translation", () => {
 			assertSameSelection(base, translated);
 			strictEqual(rowOrThrow(translated, value, `/autoresearch ${value}`).description, dictionary[key]);
 		}
+	});
+
+	test("translates only the exact installed code-review description variants", async () => {
+		const { autocomplete } = await loadHostAutocomplete();
+		const descriptions = [
+			"Annotate local changes or a GitHub pull request",
+			"Annotate local changes, a GitHub pull request, or a GitLab merge request",
+			"Custom code-review workflow",
+		] as const;
+		for (const description of descriptions) {
+			const command: SlashCommand = {
+				name: "annotate",
+				description: "Annotate local changes, a GitHub pull request, or a GitLab merge request",
+				getArgumentCompletions: () => [{ value: "code-review ", label: "code-review", description }],
+			};
+			const provider = new autocomplete.CombinedAutocompleteProvider([command], repoDir);
+			const wrapped = wrapProvider(provider, []);
+			const input = "/annotate c";
+			const base = resultOrThrow(await provider.getSuggestions([input], 0, input.length), `host /annotate ${description}`);
+			const translated = resultOrThrow(await wrapped.getSuggestions([input], 0, input.length), `wrapped /annotate ${description}`);
+			assertSameSelection(base, translated);
+			strictEqual(
+				rowOrThrow(translated, "code-review ", `translated /annotate ${description}`).description,
+				dictionary[description] ?? description,
+			);
+		}
+
+		const oldDescription = "Annotate local changes or a GitHub pull request";
+		const legacyCommand: SlashCommand = {
+			name: "annotate",
+			description: "Annotate local changes, a GitHub pull request, or a GitLab merge request",
+			getArgumentCompletions: () => [{ value: "code-review ", label: "code-review", description: oldDescription }],
+		};
+		const legacyProvider = new autocomplete.CombinedAutocompleteProvider([legacyCommand], repoDir);
+		const legacyDictionary = { [oldDescription]: "翻译旧版本地更改描述" };
+		const legacyWrapped = requireAutocompleteProvider(wrapSlashCommandAutocomplete(legacyProvider, [], legacyDictionary));
+		const input = "/annotate c";
+		const base = resultOrThrow(await legacyProvider.getSuggestions([input], 0, input.length), "legacy-only /annotate code-review");
+		const translated = resultOrThrow(await legacyWrapped.getSuggestions([input], 0, input.length), "translated legacy-only /annotate code-review");
+		assertSameSelection(base, translated);
+		strictEqual(rowOrThrow(translated, "code-review ", "legacy-only translated /annotate code-review").description, legacyDictionary[oldDescription]);
 	});
 
 	test("preserves unknown command wording and translates only the host argument-hint format", async () => {

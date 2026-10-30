@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert";
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -69,6 +69,7 @@ void (async () => {
 const settingsTemplateKeys = [
 	"Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until {escape}",
 	"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+	"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target, and clicks on extension-owned links reach their extension (the link-hint key picks them without the mouse). Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
 	"Modal prompt editing. {escape} leaves Insert mode; Normal mode has hjkl, 0, $, ^, w, b, e, gg, G, counts, x/D/C, dd/yy, p and u; operators take motions or text objects (diw, ca(, dap); v/V start a Visual selection that y copies and d deletes",
 	"Keep drafts cleared with {ctrlC} in local {upDown} history until exit; disabling affects future clears",
 	"What pressing {escape} twice with an empty editor does: open the transcript rewind selector, open the session tree, or nothing",
@@ -98,6 +99,7 @@ function collectDisplayFields(
 				const optionRecord = option as Record<string, unknown>;
 				for (const key of ["label", "description"]) {
 					const value = optionRecord[key];
+					if (key === "label" && value === optionRecord.value) continue;
 					addField(fields, value, `${entry.path}.options[${index}].${key}`);
 				}
 			}
@@ -292,6 +294,26 @@ async function readInstalledDisplayFields(): Promise<DisplayField[]> {
 describe("real installed settings dictionary coverage", () => {
 	// Keep cold selected-host imports outside the default test timeout.
 	beforeAll(async () => { await readInstalledDisplayFields(); }, 30_000);
+	test("does not require raw option values to have dictionary translations", () => {
+		const fields = collectDisplayFields([{
+			path: "models.defaultThinkingLevel",
+			ui: { tab: "models", options: [
+				{ value: "high", label: "high", description: "High reasoning effort" },
+				{ value: "max", label: "Maximum", description: "Maximum reasoning effort" },
+			] },
+		}], { SETTING_TABS: ["models"], TAB_METADATA: {}, TAB_GROUPS: {} });
+		deepStrictEqual(fields, [
+			{ text: "High reasoning effort", path: "models.defaultThinkingLevel.options[0].description" },
+			{ text: "Maximum", path: "models.defaultThinkingLevel.options[1].label" },
+			{ text: "Maximum reasoning effort", path: "models.defaultThinkingLevel.options[1].description" },
+		]);
+		deepStrictEqual(findUncoveredFields(fields, {}).map(field => field.text), [
+			"High reasoning effort",
+			"Maximum",
+			"Maximum reasoning effort",
+		]);
+	});
+
 	test("covers semantic fields emitted by the installed settings UI", async () => {
 		const fields = await readInstalledDisplayFields();
 		const templateFields = settingsTemplateKeys.map((text, index) => ({ text, path: `settings template ${index}` }));

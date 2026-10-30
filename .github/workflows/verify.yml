@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - name: Derive minimum and latest host versions
         id: hosts
         shell: bash
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - name: Install development dependencies
         run: bun install --frozen-lockfile
       - name: Type check

@@ -8,6 +8,10 @@ import type { HostPackage } from "../runtime/host";
 import { makeTempDir, removeTree, runCommand, sameFileSystemEntry, snapshotTree, createHostFixture, writeText } from "../tests/verification-fixtures";
 import type { Env } from "./install-core";
 import type { CommandResult } from "../tests/verification-fixtures";
+import { MANAGEMENT_MENU_MODULES } from "../runtime/menu-management";
+import { GIT_MENU_MODULES } from "../runtime/menu-git";
+import { DASHBOARD_MENU_MODULES } from "../runtime/menu-dashboards";
+import { DIALOG_MENU_MODULES } from "../runtime/menu-dialogs";
 
 function versionBelow(version: string): string {
 	const parts = version.split(".").map(Number);
@@ -281,6 +285,161 @@ async function verifyInstalledSettingsSurface(host: HostPackage, env: NodeJS.Pro
 	return JSON.stringify(surface);
 }
 
+function assertMenuTextMode(
+	actual: string,
+	english: readonly string[],
+	mode: ModelSurfaceMode,
+	sourceSupported: boolean,
+	label: string,
+): void {
+	const translated = mode !== "ordinary" && sourceSupported;
+	assertion(translated ? !english.includes(actual) : english.includes(actual), `${label} did not match its source capability and authorization`);
+}
+
+async function verifyInstalledMenuSurface(host: HostPackage, env: NodeJS.ProcessEnv, mode: ModelSurfaceMode): Promise<string> {
+	const command = ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-menu-surface.ts")];
+	const result = await runCommand(bun, command, {
+		cwd: host.packageDir,
+		env: { ...env, MENU_SURFACE_MODE: mode },
+		timeout: 120_000,
+	});
+	assertion(result.exitCode === 0, result.stderr || result.stdout);
+	const surface: unknown = JSON.parse(result.stdout.trim());
+	assertion(surface !== null && typeof surface === "object" && !Array.isArray(surface), `menu ${mode} must emit a clean structured surface result`);
+	assertion("mode" in surface && surface.mode === mode, `menu surface mode mismatch: ${mode}`);
+	const familyValue = "families" in surface ? surface.families : undefined;
+	if (!Array.isArray(familyValue)) throw new Error(`menu ${mode} family evidence is missing or malformed`);
+	const families: readonly unknown[] = familyValue;
+	assertion(
+		["model-picker", "thinking-selector", "settings-enum-options", "session-selector", "tree-selector", "oauth-selector", "session-account-selector"]
+			.every(family => families.includes(family)),
+		`menu ${mode} did not exercise the expected installed component families`,
+	);
+	assertion("picker" in surface && surface.picker !== null && typeof surface.picker === "object" && !Array.isArray(surface.picker), `menu ${mode} picker evidence is missing`);
+	const picker = surface.picker;
+	assertion(picker !== null && typeof picker === "object" && !Array.isArray(picker), `menu ${mode} picker evidence is malformed`);
+	assertion("title" in picker && typeof picker.title === "string" &&
+		"ansiTitle" in picker && typeof picker.ansiTitle === "string" &&
+		"status" in picker && typeof picker.status === "string" &&
+		"selector" in picker && picker.selector === "provider/id" &&
+		"searchQueryVisible" in picker && picker.searchQueryVisible === true &&
+		"ansiHasUserLabel" in picker && picker.ansiHasUserLabel === true &&
+		"nativeAvailable" in picker && typeof picker.nativeAvailable === "boolean" &&
+		"nativeActionAvailable" in picker && typeof picker.nativeActionAvailable === "boolean" &&
+		"nativeHasSelector" in picker && picker.nativeHasSelector === picker.nativeAvailable &&
+		"nativeSelection" in picker && typeof picker.nativeSelection === "boolean" &&
+		"sourceSupported" in picker && typeof picker.sourceSupported === "boolean" &&
+		"selectionOnlyAvailable" in picker && typeof picker.selectionOnlyAvailable === "boolean",
+		`menu ${mode} picker changed display data, keyboard search, or capability evidence`);
+	assertion(!picker.nativeActionAvailable || picker.nativeSelection === true, "available native model actions must preserve the selector payload");
+	const modelSupported = picker.sourceSupported === true;
+	const modelNativeAvailable = picker.nativeAvailable === true;
+	const selectionOnlyAvailable = picker.selectionOnlyAvailable === true;
+	const modelAnsiEnglish = selectionOnlyAvailable ? ["Select Model"] : ["Switch Model", "Switch Task Model"];
+	assertMenuTextMode(picker.ansiTitle, modelAnsiEnglish, mode, modelSupported, "ANSI model-picker title");
+	assertMenuTextMode(
+		picker.title,
+		modelNativeAvailable ? [selectionOnlyAvailable ? "Select model" : "Switch model"] : modelAnsiEnglish,
+		mode,
+		modelSupported,
+		"model-picker title",
+	);
+	const sourceStatus = selectionOnlyAvailable
+		? "Selection only — does not change the session model"
+		: "Session-only switch — role models stay unchanged";
+	const modelChromeTranslated = mode !== "ordinary" && modelSupported;
+	assertion(modelChromeTranslated ? picker.status !== sourceStatus : picker.status === sourceStatus,
+		"model-picker status did not follow its source capability");
+	if (mode === "hostile") {
+		assertion("hostileTemplateLiteral" in picker && picker.hostileTemplateLiteral === (modelSupported && selectionOnlyAvailable),
+			"hostile template evidence did not match source and select-only capabilities");
+	}
+	assertion("thinking" in surface && surface.thinking !== null && typeof surface.thinking === "object" && !Array.isArray(surface.thinking), `menu ${mode} thinking selector evidence is missing`);
+	const thinking = surface.thinking;
+	assertion(thinking !== null && typeof thinking === "object" && !Array.isArray(thinking), `menu ${mode} thinking evidence is malformed`);
+	assertion("title" in thinking && typeof thinking.title === "string" &&
+		"selected" in thinking && thinking.selected === "high" &&
+		"highLabel" in thinking && thinking.highLabel === "high" &&
+		"nativeAvailable" in thinking && typeof thinking.nativeAvailable === "boolean" &&
+		"nativeActionAvailable" in thinking && typeof thinking.nativeActionAvailable === "boolean" &&
+		"sourceSupported" in thinking && typeof thinking.sourceSupported === "boolean",
+		`menu ${mode} thinking selector changed its raw value or capability evidence`);
+	const thinkingSupported = thinking.sourceSupported === true;
+	const thinkingNativeAvailable = thinking.nativeAvailable === true;
+	assertMenuTextMode(thinking.title, thinkingNativeAvailable ? ["Thinking level"] : ["Thinking Level"], mode, thinkingSupported, "thinking-selector title");
+	assertion("settings" in surface && surface.settings !== null && typeof surface.settings === "object" && !Array.isArray(surface.settings), `menu ${mode} setting evidence is missing`);
+	const settings = surface.settings;
+	assertion(settings !== null && typeof settings === "object" && !Array.isArray(settings), `menu ${mode} settings evidence is malformed`);
+	assertion("defaultLevel" in settings && settings.defaultLevel === "high" &&
+		"maxEffortAvailable" in settings && typeof settings.maxEffortAvailable === "boolean" &&
+		"humanHighLabel" in settings && settings.humanHighLabel === (mode === "ordinary" ? "High" : mode === "hostile" ? "恶意文案-HIGH" : "高"),
+		`menu ${mode} changed the high default or a human-readable label`);
+	const maxEffortAvailable = settings.maxEffortAvailable === true;
+	if (maxEffortAvailable) {
+		assertion("maxEffort" in settings && settings.maxEffort === "xhigh" && "xhighLabel" in settings && settings.xhighLabel === "xhigh",
+			`menu ${mode} changed the available provider max-effort enum`);
+	} else {
+		assertion("maxEffort" in settings && settings.maxEffort === null && "xhighLabel" in settings && settings.xhighLabel === null,
+			`menu ${mode} misreported the absent provider max-effort setting`);
+	}
+	assertion("session" in surface && surface.session !== null && typeof surface.session === "object" && !Array.isArray(surface.session), `menu ${mode} session-selector evidence is missing`);
+	const session = surface.session;
+	assertion(session !== null && typeof session === "object" && !Array.isArray(session), `menu ${mode} session evidence is malformed`);
+	assertion("titleVisible" in session && session.titleVisible === true &&
+		"nameVisible" in session && session.nameVisible === true &&
+		"selectedId" in session && session.selectedId === "probe-session-id" &&
+		"selectedName" in session && session.selectedName === "Probe session label" &&
+		"title" in session && typeof session.title === "string" &&
+		"nativeAvailable" in session && typeof session.nativeAvailable === "boolean" &&
+		"nativeActionAvailable" in session && typeof session.nativeActionAvailable === "boolean" &&
+		"sourceSupported" in session && typeof session.sourceSupported === "boolean",
+		`menu ${mode} session selector changed its user title, selection ID, or capability evidence`);
+	const sessionSupported = session.sourceSupported === true;
+	assertMenuTextMode(session.title, ["Resume Session"], mode, sessionSupported, "session-selector title");
+	assertion("tree" in surface && surface.tree !== null && typeof surface.tree === "object" && !Array.isArray(surface.tree), `menu ${mode} tree-selector evidence is missing`);
+	const tree = surface.tree;
+	assertion(tree !== null && typeof tree === "object" && !Array.isArray(tree), `menu ${mode} tree evidence is malformed`);
+	assertion("selectedId" in tree && tree.selectedId === "probe-tree-entry" &&
+		"userLabelVisible" in tree && tree.userLabelVisible === true &&
+		"searchHintVisible" in tree && tree.searchHintVisible === true &&
+		"title" in tree && typeof tree.title === "string" &&
+		"nativeAvailable" in tree && typeof tree.nativeAvailable === "boolean" &&
+		"nativeActionAvailable" in tree && typeof tree.nativeActionAvailable === "boolean" &&
+		"sourceSupported" in tree && typeof tree.sourceSupported === "boolean",
+		`menu ${mode} tree changed its user text, entry ID, or capability evidence`);
+	const treeNativeAvailable = tree.nativeAvailable === true;
+	const treeSupported = tree.sourceSupported === true;
+	assertMenuTextMode(tree.title, treeNativeAvailable ? ["Session tree"] : ["Session Tree"], mode, treeSupported, "tree-selector title");
+	assertion("oauth" in surface && surface.oauth !== null && typeof surface.oauth === "object" && !Array.isArray(surface.oauth), `menu ${mode} OAuth-selector evidence is missing`);
+	const oauth = surface.oauth;
+	assertion(oauth !== null && typeof oauth === "object" && !Array.isArray(oauth), `menu ${mode} OAuth evidence is malformed`);
+	assertion("title" in oauth && typeof oauth.title === "string" &&
+		"providerId" in oauth && typeof oauth.providerId === "string" && oauth.providerId.length > 0 &&
+		"providerName" in oauth && typeof oauth.providerName === "string" && oauth.providerName.length > 0 &&
+		"nativeAvailable" in oauth && typeof oauth.nativeAvailable === "boolean" &&
+		"nativeActionAvailable" in oauth && typeof oauth.nativeActionAvailable === "boolean" &&
+		"sourceSupported" in oauth && typeof oauth.sourceSupported === "boolean",
+		`menu ${mode} OAuth selector lost its display title or provider data`);
+	const oauthNativeAvailable = oauth.nativeAvailable === true;
+	const oauthSupported = oauth.sourceSupported === true;
+	assertMenuTextMode(oauth.title, oauthNativeAvailable ? ["Sign in"] : ["Select provider to login"], mode, oauthSupported, "OAuth-selector title");
+	assertion("account" in surface && surface.account !== null && typeof surface.account === "object" && !Array.isArray(surface.account), `menu ${mode} session-account evidence is missing`);
+	const account = surface.account;
+	assertion(account !== null && typeof account === "object" && !Array.isArray(account), `menu ${mode} session-account evidence is malformed`);
+	assertion("title" in account && typeof account.title === "string" && account.title.includes("provider") &&
+		"credentialId" in account && account.credentialId === 1729 &&
+		"label" in account && account.label === "Probe account label" &&
+		"nativeAvailable" in account && typeof account.nativeAvailable === "boolean" &&
+		"nativeActionAvailable" in account && typeof account.nativeActionAvailable === "boolean" &&
+		"sourceSupported" in account && typeof account.sourceSupported === "boolean",
+		`menu ${mode} session-account selector changed its provider name, credential ID, or user label`);
+	const accountNativeAvailable = account.nativeAvailable === true;
+	const accountSupported = account.sourceSupported === true;
+	assertMenuTextMode(account.title, accountNativeAvailable ? ["provider account"] : ["Select a provider account for this session"], mode, accountSupported, "session-account title");
+
+	return JSON.stringify(surface);
+}
+
 async function verifyInstalledModelSurface(host: HostPackage, env: NodeJS.ProcessEnv, mode: ModelSurfaceMode): Promise<string> {
 	const command = ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", "integration-model-surface.ts")];
 	const result = await runCommand(bun, command, {
@@ -326,9 +485,71 @@ async function verifyInstalledModelSurface(host: HostPackage, env: NodeJS.Proces
 	return JSON.stringify(surface);
 }
 
+async function verifyInstalledInterfaceProbe(
+	host: HostPackage,
+	env: NodeJS.ProcessEnv,
+	file: string,
+	component: string,
+	mode?: ModelSurfaceMode,
+): Promise<string> {
+	const base = env.PROBE_DIR;
+	assertion(typeof base === "string", "the installed interface probe needs an isolated root");
+	const root = join(base, `${component}-${mode ?? "load"}`);
+	mkdirSync(root, { recursive: true });
+	const configPath = env.OMP_ZH_CONFIG;
+	assertion(typeof configPath === "string", "the installed interface probe needs a launch config");
+	const isolated = installedProbeEnvironment(root, configPath);
+	const result = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(repoDir, "runtime", "zhomp.toml")}`, join(repoDir, "tests", file)], {
+		cwd: host.packageDir,
+		env: { ...isolated, MENU_SURFACE_MODE: mode },
+		timeout: 120_000,
+	});
+	assertion(result.exitCode === 0, result.stderr || result.stdout);
+	const surface: unknown = JSON.parse(result.stdout.trim());
+	assertion(surface !== null && typeof surface === "object" && !Array.isArray(surface) &&
+		"component" in surface && surface.component === component, `${component} did not exercise its installed consumer`);
+	if (mode) assertion("mode" in surface && surface.mode === mode, `${component} mode mismatch`);
+	return JSON.stringify(surface);
+}
+
 async function verifyInstalledConsumers(host: HostPackage, env: NodeJS.ProcessEnv, modes: readonly ModelSurfaceMode[]): Promise<string> {
-	const outputs = [await verifyInstalledSettingsSurface(host, env)];
-	for (const mode of modes) outputs.push(await verifyInstalledModelSurface(host, env, mode));
+	const catalogue = await verifyInstalledInterfaceProbe(host, env, "integration-menu-load.ts", "MenuCatalogue");
+	const sourceEvidence: unknown = JSON.parse(catalogue);
+	assertion(sourceEvidence !== null && typeof sourceEvidence === "object" &&
+		"supported" in sourceEvidence && Array.isArray(sourceEvidence.supported) &&
+		sourceEvidence.supported.every((path: unknown) => typeof path === "string"), "installed menu source capability evidence is malformed");
+	const supportedPaths = new Set<string>(sourceEvidence.supported);
+	const probes = [
+		{ file: "integration-management-surface.ts", component: "ManagementMenus", modules: MANAGEMENT_MENU_MODULES, legacyFile: "integration-legacy-management-surface.ts", legacyComponent: "LegacyManagementMenus" },
+		{ file: "integration-git-surface.ts", component: "GitTui", modules: GIT_MENU_MODULES, legacyFile: undefined, legacyComponent: undefined },
+		{ file: "integration-additional-surface.ts", component: "AdditionalMenus", modules: DASHBOARD_MENU_MODULES, legacyFile: "integration-legacy-additional-surface.ts", legacyComponent: "LegacyAdditionalMenus" },
+		{ file: "integration-dialog-surface.ts", component: "DialogMenus", modules: DIALOG_MENU_MODULES, legacyFile: "integration-legacy-dialog-surface.ts", legacyComponent: "LegacyDialogMenus" },
+	];
+	const outputs = [
+		await verifyInstalledSettingsSurface(host, env), catalogue,
+		await verifyInstalledInterfaceProbe(host, env, "integration-git-cli.ts", "GitCLI"),
+		await verifyInstalledInterfaceProbe(host, env, "integration-startup-surface.ts", "StartupUI"),
+	];
+	for (const mode of modes) {
+		outputs.push(await verifyInstalledMenuSurface(host, env, mode));
+		outputs.push(await verifyInstalledModelSurface(host, env, mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-agent-views-surface.ts", "AgentViews", mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-command-menus-surface.ts", "CommandMenus", mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-context-surface.ts", "ContextViewer", mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-workflow-surface.ts", "WorkflowMenus", mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-extension-details-surface.ts", "ExtensionDetails", mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-setup-surface.ts", "SetupWizard", mode));
+		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-welcome-surface.ts", "WelcomeHints", mode));
+		for (const probe of probes) {
+			const unavailable = probe.modules.map(module => `${module.root}:${module.path}`).filter(path => !supportedPaths.has(path));
+			if (unavailable.length > 0) {
+				// Git's actual terminal/keyboard fallback was already exercised by GitCLI above.
+				if (probe.legacyFile && probe.legacyComponent) {
+					outputs.push(await verifyInstalledInterfaceProbe(host, env, probe.legacyFile, probe.legacyComponent, mode));
+				} else assertion(probe.component === "GitTui", `No real fallback consumer registered for ${probe.component}`);
+			} else outputs.push(await verifyInstalledInterfaceProbe(host, env, probe.file, probe.component, mode));
+		}
+	}
 	return outputs.join("\n");
 }
 
@@ -400,7 +621,7 @@ async function v11(): Promise<string> {
 
 		const version = await runCommand(bun, ["--no-install", "--no-env-file", `--config=${join(installedHome, ".omp", "zh", "zhomp.toml")}`, join(installedHome, ".omp", "zh", "launch.ts"), "--version"], { cwd: root });
 		assertion(version.exitCode === 0 && version.stdout.includes(`omp/${host.version}`), version.stderr || version.stdout);
-		return "the unpacked installer passed real installed SettingsHost and ModelHub probes; removing model-text.ts made the ModelHub probe fail";
+		return "the unpacked installer passed real installed SettingsHost, ModelHub, and menu surface probes; removing model-text.ts made the ModelHub probe fail";
 	});
 }
 

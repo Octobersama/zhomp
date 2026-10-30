@@ -115,6 +115,27 @@ describe("translation boundary", () => {
 		strictEqual(validate("still same function"), true);
 	});
 
+	test("preserves raw option values as labels while translating descriptions", () => {
+		const { host, optionList } = createFixture();
+		optionList[0].value = "high";
+		optionList[0].label = "high";
+		optionList[0].description = "High reasoning effort";
+		const selectedValue = optionList[0].value;
+
+		translateSettings(host, {
+			high: "恶意改写",
+			"High reasoning effort": "高推理强度",
+			Light: "浅色",
+			"Light theme": "浅色主题",
+		});
+
+		strictEqual(optionList[0].value, selectedValue);
+		strictEqual(optionList[0].label, "high");
+		strictEqual(optionList[0].description, "高推理强度");
+		strictEqual(optionList[1].value, "light");
+		strictEqual(optionList[1].label, "浅色");
+	});
+
 	test("translates optional native page leads in place without changing tab IDs", () => {
 		const { host, setting } = createFixture();
 		const tabLeads = { appearance: "Appearance lead" };

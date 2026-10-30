@@ -1,0 +1,170 @@
+import type { MenuModule } from "./menu-catalog";
+
+type DialogMenuPatch = MenuModule["patches"][number];
+
+function text(source: string, values?: string): string {
+	const key = JSON.stringify(source);
+	return values === undefined ? `__zhompMenuText(${key})` : `__zhompMenuText(${key}, ${values})`;
+}
+
+function templateText(source: string, values?: string): string {
+	return "${" + text(source, values) + "}";
+}
+
+function patch(before: string, after: string, count: number): DialogMenuPatch {
+	return { before, after, count };
+}
+
+const ASK_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
+	patch('this.#panel = new OverlayPanel("Ask");', 'this.#panel = new OverlayPanel(' + text("Ask") + ');', 1),
+	patch('\treturn disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);\n}',
+		'\tconst logicalLabels = disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);\n\tconst localizedLabels = logicalLabels.map((label, index) => localizedRecommendedLabel(question, index, label));\n\treturn disambiguateDisplayLabels(localizedLabels, [' + text("Other…") + ', ...GUEST_ACTION_LABELS]);\n}\n\nfunction localizedRecommendedLabel(question: ExtensionAskDialogQuestion, index: number, label: string): string {\n\tconst option = question.options[index];\n\tif (!option || question.recommended !== index) return label;\n\tconst base = sanitizeCarriageReturns(option.label);\n\tconst badgeStart = base.length;\n\tif (base.endsWith(RECOMMENDED_SUFFIX) || label.slice(badgeStart, badgeStart + RECOMMENDED_SUFFIX.length) !== RECOMMENDED_SUFFIX) return label;\n\tconst suffix = __zhompMenuText(" (Recommended)");\n\treturn `${label.slice(0, badgeStart)}${suffix}${label.slice(badgeStart + RECOMMENDED_SUFFIX.length)}`;\n}', 1),
+	patch('function optionLabelSpans(question: ExtensionAskDialogQuestion, optionIndex: number, label: string): TspSpan[] {\n\tconst recommended = question.recommended === optionIndex && label.endsWith(RECOMMENDED_SUFFIX);\n\treturn inlineCodeSpans(recommended ? label.slice(0, -RECOMMENDED_SUFFIX.length) : label);\n}',
+		'function optionLabelSpans(question: ExtensionAskDialogQuestion, optionIndex: number, label: string): TspSpan[] {\n\tif (question.recommended !== optionIndex) return inlineCodeSpans(label);\n\tconst option = question.options[optionIndex];\n\tconst base = option ? sanitizeCarriageReturns(option.label) : "";\n\tif (base.endsWith(RECOMMENDED_SUFFIX) && label.startsWith(base)) {\n\t\treturn inlineCodeSpans(label.slice(0, base.length - RECOMMENDED_SUFFIX.length) + label.slice(base.length));\n\t}\n\tconst suffix = __zhompMenuText(" (Recommended)");\n\treturn label.slice(base.length, base.length + suffix.length) === suffix\n\t\t? inlineCodeSpans(label.slice(0, base.length) + label.slice(base.length + suffix.length))\n\t\t: inlineCodeSpans(label);\n}', 1),
+	patch('const label = renderInlineMarkdown(rowItem.label, mdTheme, t => theme.fg(color, t));',
+		'const displayLabel = isOther ? ' + text("Other…") + ' : isOption ? localizedRecommendedLabel(question, rowItem.optionIndex ?? -1, rowItem.label) : rowItem.label;\n\tconst label = renderInlineMarkdown(displayLabel, mdTheme, t => theme.fg(color, t));', 1),
+	patch('theme.fg("success", "  ✎ note")', 'theme.fg("success", `  ✎ ${' + text("note") + '}`)', 1),
+	patch('? [span(OTHER_LABEL)]', '? [span(' + text("Other…") + ')]', 1),
+	patch('span("Type your own answer")', 'span(' + text("Type your own answer") + ')', 1),
+	patch('...(recommended ? { value: [span("Recommended")] } : {})', '...(recommended ? { value: [span(' + text("Recommended") + ')] } : {})', 1),
+	patch('if (!isAnswered(state)) return [span("Unanswered", "warning")];', 'if (!isAnswered(state)) return [span(' + text("Unanswered") + ', "warning")];', 1),
+	patch('answers.push(`Other: “${normalizedInlineInput(state.customInput)}”`)', 'answers.push(' + text("Other: “{answer}”", "{ answer: normalizedInlineInput(state.customInput) }") + ')', 1),
+	patch('return answers.length > 0 ? answers.join(", ") : theme.fg("warning", "unanswered");', 'return answers.length > 0 ? answers.join(", ") : theme.fg("warning", ' + text("unanswered") + ');', 1),
+	patch('if (selected.length === 0) return theme.fg("warning", "unanswered");', 'if (selected.length === 0) return theme.fg("warning", ' + text("unanswered") + ');', 1),
+	patch('title: "Next question  tab · Previous  shift+tab",', 'title: ' + text("Next question  tab · Previous  shift+tab") + ',', 1),
+	patch('items.push({ id: "submit", label: [span(REVIEW_TAB)] });', 'items.push({ id: "submit", label: [span(' + text("Review") + ')] });', 1),
+	patch('title: "Answers the recommended option when the time runs out",', 'title: ' + text("Answers the recommended option when the time runs out") + ',', 1),
+	patch('span("Question  ", "muted")', 'span(' + text("Question") + ' + "  ", "muted")', 1),
+	patch('title: `Show the question${hideKey ? `  ${formatTooltipKey(hideKey)}` : ""}`', 'title: hideKey ? ' + text("Show the question  {key}", "{ key: formatTooltipKey(hideKey) }") + ' : ' + text("Show the question"), 1),
+	patch('`  +${this.#questions.length - 1} more`', '`  +' + templateText("{count} more", "{ count: this.#questions.length - 1 }") + '`', 1),
+	patch('actionButton("Show", "show", {', 'actionButton(' + text("Show") + ', "show", {', 1),
+	patch('actionButton("Skip", "cancel",', 'actionButton(' + text("Skip") + ', "cancel",', 2),
+	patch('actionButton("Hide", "hide", {', 'actionButton(' + text("Hide") + ', "hide", {', 1),
+	patch('title: `Skip without answering${cancelKey ? `  ${formatTooltipKey(cancelKey)}` : ""}`',
+		'title: cancelKey ? ' + text("Skip without answering  {key}", "{ key: formatTooltipKey(cancelKey) }") + ' : ' + text("Skip without answering"), 1),
+	patch('title: `Hide until you are ready to answer${hideKey ? `  ${formatTooltipKey(hideKey)}` : ""}`',
+		'title: hideKey ? ' + text("Hide until you are ready to answer  {key}", "{ key: formatTooltipKey(hideKey) }") + ' : ' + text("Hide until you are ready to answer"), 1),
+	patch('const submit = actionButton("Submit", "submit", {', 'const submit = actionButton(' + text("Submit") + ', "submit", {', 1),
+	patch('title: "Submit answers  enter",', 'title: ' + text("Submit answers  enter") + ',', 1),
+	patch('const enterLabel = last ? "Submit" : "Next";', 'const enterAction = last ? "Submit" : "Next";\n\t\tconst enterLabel = last ? ' + text("Submit") + ' : ' + text("Next") + ';', 1),
+	patch('title: question?.multi ? `${enterLabel}  enter · Toggle  space` : `${enterLabel}  enter`,',
+		'title: question?.multi ? ' + text("{label}  enter · Toggle  space", "{ label: enterLabel }") + ' : ' + text("{label}  enter", "{ label: enterLabel }") + ',', 1),
+	patch('const notice =\n\t\t\tunanswered > 0\n\t\t\t\t? [\n\t\t\t\t\t\tspan(`${unanswered} unanswered`, "warning"),\n\t\t\t\t\t\tspan(` · Submit still sends ${unanswered === this.#questions.length ? "the questions" : "the rest"}`),\n\t\t\t\t\t]\n\t\t\t\t: [span("All answered · Submit sends them")];',
+		'const notice =\n\t\t\tunanswered > 0\n\t\t\t\t? [\n\t\t\t\t\t\tspan(' + text("{count} unanswered", "{ count: unanswered }") + ', "warning"),\n\t\t\t\t\t\tspan(' + text(" · Submit still sends {rest}", '{ rest: __zhompMenuText(unanswered === this.#questions.length ? "the questions" : "the rest") }') + '),\n\t\t\t\t\t]\n\t\t\t\t: [span(' + text("All answered · Submit sends them") + ')];', 1),
+	patch('{ id: "submit", label: "Submit" },', '{ id: "submit", label: ' + text("Submit") + ' },', 1),
+	patch('lines.push(theme.bold(theme.fg("accent", "Review answers")));', 'lines.push(theme.bold(theme.fg("accent", ' + text("Review answers") + ')));', 1),
+	patch('return ` · ${expandKeyHint()} ${this.#expanded ? "collapse" : "expand"}`;', 'return ` · ${expandKeyHint()} ${this.#expanded ? ' + text("collapse") + ' : ' + text("expand") + '}`;', 1),
+	patch('const cancel = `${editorKey("tui.select.cancel")} cancel${hideKey ? ` · ${hideKey} hide` : ""}`;',
+		'const cancel = `${editorKey("tui.select.cancel")} ' + templateText("cancel") + '${hideKey ? ` · ${hideKey} ' + templateText("hide") + '` : ""}`;', 1),
+	patch('const scroll = indicator ? ` ${indicator} scroll ·` : "";', 'const scroll = indicator ? ` ${indicator} ' + templateText("scroll") + ' ·` : "";', 2),
+	patch('return `${enter} submit · ${upDown} scroll ·${scroll} ${cancel}`;', 'return `${enter} ' + templateText("submit") + ' · ${upDown} ' + templateText("scroll") + ' ·${scroll} ${cancel}`;', 1),
+	patch('`${formatKeyHint("space")} toggle · ${enter} ${enterAction}`', '`${formatKeyHint("space")} ' + templateText("toggle") + ' · ${enter} ${enterAction === "next" ? ' + text("next") + ' : ' + text("submit") + '}`', 1),
+	patch('`${enter} select · ${formatKeyHint("n")} note`', '`${enter} ' + templateText("select") + ' · ${formatKeyHint("n")} ' + templateText("note") + '`', 1),
+	patch('` · ${formatKeyHints(["tab", "left", "right"])} question`', '` · ${formatKeyHints(["tab", "left", "right"])} ' + templateText("question") + '`', 1),
+	patch('return `${action} · ${upDown} move${tabs} ·${scroll} ${cancel}${expand}`;', 'return `${action} · ${upDown} ' + templateText("move") + '${tabs} ·${scroll} ${cancel}${expand}`;', 1),
+	patch('allLines.push(\n\t\t\t\ttheme.fg(\n\t\t\t\t\t"warning",\n\t\t\t\t\t`${unanswered} unanswered question${unanswered === 1 ? "" : "s"}; ${formatKeyHint("enter")} still submits.`,\n\t\t\t\t),\n\t\t\t);',
+		'allLines.push(\n\t\t\t\ttheme.fg(\n\t\t\t\t\t"warning",\n\t\t\t\t\tunanswered === 1 ? ' + text("{count} unanswered question; {enter} still submits.", '{ count: unanswered, enter: formatKeyHint("enter") }') + ' : ' + text("{count} unanswered questions; {enter} still submits.", '{ count: unanswered, enter: formatKeyHint("enter") }') + ',\n\t\t\t\t),\n\t\t\t);', 1),
+	patch('theme.fg("muted", `   Note: ${truncateToWidth(note, Math.max(1, width - 9), Ellipsis.Unicode)}`)', 'theme.fg("muted", `   ' + templateText("Note:") + ' ${truncateToWidth(note, Math.max(1, width - 9), Ellipsis.Unicode)}`)', 1),
+	patch('allLines.push(theme.fg("accent", `${theme.nav.cursor} ${SUBMIT_OPTION}`));', 'allLines.push(theme.fg("accent", `${theme.nav.cursor} ' + templateText("Submit") + '`));', 1),
+	patch('return this.#remainingSeconds === undefined ? "Ask" : `Ask (${this.#remainingSeconds}s)`;', 'return this.#remainingSeconds === undefined ? ' + text("Ask") + ' : ' + text("Ask ({seconds}s)", "{ seconds: this.#remainingSeconds }") + ';', 1),
+	patch('if (show) hints.push(`${show} show`);', 'if (show) hints.push(`${show} ' + templateText("show") + '`);', 1),
+	patch('hints.push(`${editorKey("tui.select.cancel")} cancel`);', 'hints.push(`${editorKey("tui.select.cancel")} ' + templateText("cancel") + '`);', 1),
+	patch('const label = theme.fg("accent", `${this.#titleText()} hidden:`);', 'const label = theme.fg("accent", `${this.#titleText()} ' + templateText("hidden:") + '`);', 1),
+	patch('theme.fg("dim", ` (+${this.#questions.length - 1} more)`) : "";', 'theme.fg("dim", ` (+' + templateText("{count} more", "{ count: this.#questions.length - 1 }") + ')`) : "";', 1),
+	patch('const result = await this.#openPrompt({ title: "Custom answer", question: question.question }, prefill);', 'const result = await this.#openPrompt({ title: ' + text("Custom answer") + ', question: question.question }, prefill);', 1),
+	patch('{ title: `Note for ${rowItem.label}`, question: question.question },', '{ title: ' + text("Note for {option}", "{ option: rowItem.label }") + ', question: question.question },', 1),
+];
+
+const ASK_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+	[
+		patch('const note = actionButton("Note", "note", { keys: "n", title: "Add a note to the highlighted answer  n" });',
+			'const note = actionButton(' + text("Note") + ', "note", { keys: "n", title: ' + text("Add a note to the highlighted answer  n") + ' });', 1),
+	],
+	[
+		patch('const note = actionButton("Note", "note", {\n\t\t\tkeys: "n",\n\t\t\ttitle: "Add a note to the highlighted answer, or to the one just picked  n",\n\t\t});',
+			'const note = actionButton(' + text("Note") + ', "note", {\n\t\t\tkeys: "n",\n\t\t\ttitle: ' + text("Add a note to the highlighted answer, or to the one just picked  n") + ',\n\t\t});', 1),
+	],
+];
+
+const APPROVAL_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
+	patch('const label = drafting && choice.answer === "deny" ? DENY_AND_SEND_LABEL : choice.label;', 'const label = this.#displayChoiceLabel(choice, drafting);', 1),
+	patch('\t#take(answer: ApprovalAnswer): void {', '\t#displayChoiceLabel(choice: ApprovalChoice, drafting = false): string {\n\t\tswitch (choice.answer) {\n\t\t\tcase "remember":\n\t\t\t\treturn `${choice.label.slice(0, -"Remember across sessions".length)}${__zhompMenuText("Remember across sessions")}`;\n\t\t\tcase "once":\n\t\t\t\treturn this.options.grants?.length ? __zhompMenuText("Approve Once") : __zhompMenuText("Approve");\n\t\t\tcase "deny":\n\t\t\t\treturn drafting ? ' + text("Deny and send message") + ' : ' + text("Deny") + ';\n\t\t\tdefault:\n\t\t\t\treturn choice.label;\n\t\t}\n\t}\n\n\t#take(answer: ApprovalAnswer): void {', 1),
+	patch('/** The Deny row while a composer draft holds Enter: sending it denies the call and steers the turn. */\nconst DENY_AND_SEND_LABEL = "Deny and send message";', "", 1),
+	patch('label: choice.label,', 'label: this.#displayChoiceLabel(choice),', 1),
+	patch('const deny = actionButton("Deny", "deny", {', 'const deny = actionButton(' + text("Deny") + ', "deny", {', 1),
+	patch('title: `Deny this call${cancelKey ? `  ${formatTooltipKey(cancelKey)}` : ""}`', 'title: cancelKey ? ' + text("Deny this call  {key}", "{ key: formatTooltipKey(cancelKey) }") + ' : ' + text("Deny this call"), 1),
+	patch('const approve = actionButton(this.options.grants?.length ? "Approve Once" : "Approve", "approve", {', 'const approve = actionButton(this.options.grants?.length ? ' + text("Approve Once") + ' : ' + text("Approve") + ', "approve", {', 1),
+	patch('actionButton(this.#expanded ? "Less" : "Details", "expand", {', `actionButton(this.#expanded ? ${text("Less")} : ${text("Details")}, "expand", {`, 1),
+	patch('title: `${this.#expanded ? "Summarize" : "Show every detail of"} this call  ${formatTooltipKey(expandKey)}`',
+		'title: this.#expanded ? ' + text("Summarize this call  {key}", "{ key: formatTooltipKey(expandKey) }") + ' : ' + text("Show every detail of this call  {key}", "{ key: formatTooltipKey(expandKey) }"), 1),
+	patch('title: `Approve this call${approveKey ? `  ${formatTooltipKey(approveKey)}` : ""}`', 'title: approveKey ? ' + text("Approve this call  {key}", "{ key: formatTooltipKey(approveKey) }") + ' : ' + text("Approve this call"), 1),
+	patch('const keys = `${approve} approve · ${editorKey("tui.select.cancel")} deny${expand}`;',
+		'const keys = `${approve} ' + templateText("approve") + ' · ${editorKey("tui.select.cancel")} ' + templateText("deny") + '${expand}`;', 1),
+	patch('if (drafting) return `${editorKey("tui.input.submit")} deny and send · ${keys}`;', 'if (drafting) return `${editorKey("tui.input.submit")} ' + templateText("deny and send") + ' · ${keys}`;', 1),
+	patch('? ` · ${formatKeyHints([appToolsExpandKey()])} ${this.#expanded ? "less" : "details"}`', '? ` · ${formatKeyHints([appToolsExpandKey()])} ${this.#expanded ? ' + text("less") + ' : ' + text("details") + '}`', 1),
+	patch('const choose = `${editorKeys("tui.select.up", "tui.select.down")} choose · ${editorKey("tui.select.confirm")} select`;', 'const choose = `${editorKeys("tui.select.up", "tui.select.down")} ' + templateText("choose") + ' · ${editorKey("tui.select.confirm")} ' + templateText("select") + '`;', 1),
+	patch('const scroll = overflows ? ` · ${editorKeys("tui.select.pageUp", "tui.select.pageDown")} scroll` : "";', 'const scroll = overflows ? ` · ${editorKeys("tui.select.pageUp", "tui.select.pageDown")} ' + templateText("scroll") + '` : "";', 1),
+	patch('return `${choose} · ${keys}${scroll}${this.options.draft ? " · type to deny and steer" : ""}`;', 'return `${choose} · ${keys}${scroll}${this.options.draft ? ` · ' + templateText("type to deny and steer") + '` : ""}`;', 1),
+];
+
+const HOOK_SELECTOR_PATCHES: readonly DialogMenuPatch[] = [
+	patch('`${editorKeys("tui.select.up", "tui.select.down")} navigate  ${formatKeyHint("enter")} select  ${editorKey("tui.select.cancel")} cancel`',
+		'`${editorKeys("tui.select.up", "tui.select.down")} ' + templateText("navigate") + '  ${formatKeyHint("enter")} ' + templateText("select") + '  ${editorKey("tui.select.cancel")} ' + templateText("cancel") + '`', 1),
+	patch('empty: "No matching options",', 'empty: ' + text("No matching options") + ',', 2),
+	patch('rows.push({ text: theme.fg("dim", "  No matching options"), highlight: false });',
+		'rows.push({ text: theme.fg("dim", "  " + ' + text("No matching options") + '), highlight: false });', 1),
+	patch('noun: "options",', 'noun: ' + text("options") + ',', 1),
+	patch('actions: [pickerAction("confirm", "Select", "enter", { primary: true }), CLOSE_ACTION],',
+		'actions: [pickerAction("confirm", ' + text("Select") + ', "enter", { primary: true }), { ...CLOSE_ACTION, label: ' + text("Close") + ' }],', 1),
+	patch('if (!this.#menu.query.trim()) return theme.fg("dim", `  (${count})  Type to search`);',
+		'if (!this.#menu.query.trim()) return theme.fg("dim", `  (${count})  ' + templateText("Type to search") + '`);', 1),
+	patch('return `${theme.fg("dim", `  (${count})  Search: `)}${field}`;',
+		'return `${theme.fg("dim", `  (${count})  ' + templateText("Search:") + ' `)}${field}`;', 1),
+	patch('node("text", { spans: [span("Search: ", "dim"), span(query)], wrap: "none" }, undefined, "search"),',
+		'node("text", { spans: [span(' + text("Search:") + ' + " ", "dim"), span(query)], wrap: "none" }, undefined, "search"),', 1),
+	patch('actionHint(["tui.select.up", "tui.select.down"], "navigate")',
+		'actionHint(["tui.select.up", "tui.select.down"], ' + text("navigate") + ')', 1),
+	patch('{ keys: ENTER_KEYS, label: "select" }', '{ keys: ENTER_KEYS, label: ' + text("select") + ' }', 1),
+	patch('actionHint("tui.select.cancel", "cancel")', 'actionHint("tui.select.cancel", ' + text("cancel") + ')', 1),
+	patch(
+		'export interface HookSelectorOption {\n\tlabel: string;\n\tdescription?: string;\n}',
+		'export interface HookSelectorOption {\n\tlabel: string;\n\tdescription?: string;\n\tdisplayLabel?: string;\n}',
+		1,
+	),
+	patch(
+		'function normalizeHookSelectorOption(option: HookSelectorOptionInput): HookSelectorOption {\n\tif (typeof option === "string") return { label: option };\n\tif (option.description?.trim()) {\n\t\treturn { label: option.label, description: option.description.trim() };\n\t}\n\treturn { label: option.label };\n}',
+		'function normalizeHookSelectorOption(option: HookSelectorOptionInput): HookSelectorOption {\n\tif (typeof option === "string") return { label: option };\n\tconst displayLabel = typeof option.displayLabel === "string" ? { displayLabel: option.displayLabel } : {};\n\tif (option.description?.trim()) {\n\t\treturn { label: option.label, description: option.description.trim(), ...displayLabel };\n\t}\n\treturn { label: option.label, ...displayLabel };\n}',
+		1,
+	),
+	patch(
+		'const label = renderInlineMarkdown(option.label, mdTheme, t => theme.fg(textColor, t));',
+		'const label = renderInlineMarkdown(option.displayLabel ?? option.label, mdTheme, t => theme.fg(textColor, t));',
+		1,
+	),
+	patch('label: plainInline(option.label, mdTheme),', 'label: plainInline(option.displayLabel ?? option.label, mdTheme),', 1),
+	patch('const label = plainInline(option.label, mdTheme);', 'const label = plainInline(option.displayLabel ?? option.label, mdTheme);', 1),
+];
+
+export const DIALOG_MENU_MODULES: readonly MenuModule[] = [
+	{ root: "tui", path: "src/overlays/ask-dialog.ts", patches: ASK_DIALOG_PATCHES, variants: ASK_DIALOG_VARIANTS },
+	{ root: "tui", path: "src/overlays/approval-dialog.ts", patches: APPROVAL_DIALOG_PATCHES },
+	{ root: "tui", path: "src/overlays/hook-selector.ts", patches: HOOK_SELECTOR_PATCHES },
+];
+
+export const DIALOG_MENU_TEXT_KEYS: readonly string[] = [
+	"Ask", "Ask ({seconds}s)", "Other…", " (Recommended)", "Recommended", "Review", "Submit", "Next",
+	"Type your own answer", "Unanswered", "Other: “{answer}”", "unanswered", "Question", "Show", "Skip", "Hide",
+	"Custom answer", "Note for {option}",
+	"Show the question", "Show the question  {key}", "Skip without answering", "Skip without answering  {key}",
+	"Hide until you are ready to answer", "Hide until you are ready to answer  {key}", "{count} more",
+	"Next question  tab · Previous  shift+tab", "Answers the recommended option when the time runs out", "Submit answers  enter",
+	"Toggle  space", "{label}  enter · Toggle  space", "{label}  enter", "Note", "Add a note to the highlighted answer  n",
+	"Add a note to the highlighted answer, or to the one just picked  n",
+	"{count} unanswered", " · Submit still sends {rest}", "the questions", "the rest", "All answered · Submit sends them",
+	"Review answers", "collapse", "expand", "show", "cancel", "hide", "submit", "scroll", "toggle", "select", "note",
+	"question", "move", "next", "hidden:", "{count} unanswered question; {enter} still submits.", "{count} unanswered questions; {enter} still submits.", "Note:",
+	"Remember across sessions", "Approve Once", "Approve", "Deny", "Deny and send message", "Details", "Less",
+	"Summarize this call  {key}", "Show every detail of this call  {key}", "Deny this call", "Deny this call  {key}",
+	"Approve this call", "Approve this call  {key}", "approve", "deny", "details", "less", "deny and send", "choose",
+	"type to deny and steer", "navigate", "options", "No matching options", "Close", "Type to search", "Search:",
+];

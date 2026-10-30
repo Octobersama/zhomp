@@ -254,18 +254,21 @@ function captureTemplateValues(source: string, template: string): Record<string,
 
 function translatedSettingDescription(
 	description: RawSettingDescription,
-	templateKey: string | undefined,
+	templateKeys: string | readonly string[] | undefined,
 	captures: Record<string, string>,
 	dictionary: Record<string, string>,
 ): string {
 	const source = readRawSettingDescription(description);
-	if (templateKey) {
-		if (description.descriptor?.get && source === renderTemplate(templateKey, captures)) {
-			return renderDictionaryTemplate(dictionary, templateKey, captures);
-		}
-		if (!description.descriptor?.get) {
-			const sourceCaptures = captureTemplateValues(source, templateKey);
-			if (sourceCaptures) return renderDictionaryTemplate(dictionary, templateKey, sourceCaptures);
+	const candidates = typeof templateKeys === "string" ? [templateKeys] : templateKeys;
+	if (candidates) {
+		for (const key of candidates) {
+			if (description.descriptor?.get && source === renderTemplate(key, captures)) {
+				return renderDictionaryTemplate(dictionary, key, captures);
+			}
+			if (!description.descriptor?.get) {
+				const sourceCaptures = captureTemplateValues(source, key);
+				if (sourceCaptures) return renderDictionaryTemplate(dictionary, key, sourceCaptures);
+			}
 		}
 	}
 	const translated = Object.hasOwn(dictionary, source) ? dictionary[source] : undefined;
@@ -273,14 +276,16 @@ function translatedSettingDescription(
 	if (description.descriptor?.get) {
 		throw new Error(`Unsupported real settings getter description source for ${description.path}: ${source}`);
 	}
-	if (templateKey) throw new Error(`Missing exact dictionary translation for static settings description ${description.path}: ${source}`);
+	if (candidates) throw new Error(`Missing exact dictionary translation for static settings description ${description.path}: ${source}`);
 	return source;
 }
-
 // Canonical key-hint templates mirror the host's template-first description translation.
-const getterDescriptionTemplateKeys: Record<string, string> = {
+const getterDescriptionTemplateKeys: Record<string, string | readonly string[]> = {
 	"tui.codexResetFireworks": "Celebrate unscheduled Codex weekly usage resets and newly banked saved resets with a top-third fireworks overlay that remains until {escape}",
-	"tui.mouse": "Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+	"tui.mouse": [
+		"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+		"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target, and clicks on extension-owned links reach their extension (the link-hint key picks them without the mouse). Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+	],
 	"tui.vimMode": "Modal prompt editing. {escape} leaves Insert mode; Normal mode has hjkl, 0, $, ^, w, b, e, gg, G, counts, x/D/C, dd/yy, p and u; operators take motions or text objects (diw, ca(, dap); v/V start a Visual selection that y copies and d deletes",
 	"composer.recallClearedDrafts": "Keep drafts cleared with {ctrlC} in local {upDown} history until exit; disabling affects future clears",
 	doubleEscapeAction: "What pressing {escape} twice with an empty editor does: open the transcript rewind selector, open the session tree, or nothing",
@@ -413,10 +418,10 @@ try {
 			if (description.path === loopGuard.id || description.path === searchEndpoint.id) continue;
 			const entry = surface.entries.find(candidate => candidate.path === description.path);
 			if (!entry || typeof entry.ui?.description !== "string") throw new Error(`Missing real settings description: ${description.path}`);
-			const templateKey: string | undefined = getterDescriptionTemplateKeys[description.path];
+			const templateKeys: string | readonly string[] | undefined = getterDescriptionTemplateKeys[description.path];
 			strictEqual(
 				entry.ui.description,
-				translatedSettingDescription(description, templateKey, descriptionCaptures, dictionary),
+				translatedSettingDescription(description, templateKeys, descriptionCaptures, dictionary),
 				`${preset} ${description.path} description`,
 			);
 		}

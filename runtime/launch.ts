@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readLaunchConfig } from "./host";
+import { readLaunchConfig, type LaunchConfig } from "./host";
 
 interface CommandRouterModule {
 	LAUNCH_FLAG_COMMANDS: Record<string, unknown>;
@@ -9,6 +9,15 @@ interface CommandRouterModule {
 
 interface CliArgsModule {
 	parseArgs(args: string[]): unknown;
+}
+
+async function registerDisplayTransforms(config: LaunchConfig, configPath: string): Promise<void> {
+	const extension: unknown = await import(pathToFileURL(config.extensionPath).href);
+	if (extension === null || typeof extension !== "object" ||
+		!("preparePreloadDisplayTranslations" in extension) || typeof extension.preparePreloadDisplayTranslations !== "function") {
+		throw new Error("Installed display translation preload is unavailable; reinstall zhomp.");
+	}
+	await extension.preparePreloadDisplayTranslations(config, configPath);
 }
 
 async function preload(configPath: string, cwd: string): Promise<void> {
@@ -43,6 +52,11 @@ async function preload(configPath: string, cwd: string): Promise<void> {
 			throw new Error("The OMP command router returned invalid arguments.");
 		}
 		const command = routedArgs[0];
+		if (command === "git") {
+			// The standalone TUI does not load extensions or accept launch-only flags.
+			await registerDisplayTransforms(config, configPath);
+			return;
+		}
 		if (typeof command === "string" && router.LAUNCH_FLAG_COMMANDS[command] === true) {
 			const parserValue: unknown = await import(pathToFileURL(config.host.cliArgsPath).href);
 			if (parserValue === null || typeof parserValue !== "object" || Array.isArray(parserValue) ||
@@ -60,12 +74,7 @@ async function preload(configPath: string, cwd: string): Promise<void> {
 			}
 			if (!noExtensions) {
 				// Register display transforms before the host CLI imports their consumers.
-				const extension: unknown = await import(pathToFileURL(config.extensionPath).href);
-				if (extension === null || typeof extension !== "object" ||
-					!("preparePreloadDisplayTranslations" in extension) || typeof extension.preparePreloadDisplayTranslations !== "function") {
-					throw new Error("Installed display translation preload is unavailable; reinstall zhomp.");
-				}
-				await extension.preparePreloadDisplayTranslations(config, configPath);
+				await registerDisplayTransforms(config, configPath);
 				// Insert before the user's `--` boundary; the host still applies its normal routing.
 				process.argv.splice(2, 0, "--extension", config.extensionPath);
 			}

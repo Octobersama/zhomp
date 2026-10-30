@@ -1,7 +1,7 @@
 // OMP 中文汉化扩展（非破坏性，可插拔）
 //
 // 运行时通过启动器传入同目录的安装配置；扩展使用该安装随附的 host 契约
-// 重新验证宿主；preload 注册 Model 文案转换，扩展 factory 翻译 settings 并注册 slash autocomplete 显示层。
+// 重新验证宿主；preload 注册 Model、settings UI 与菜单文案转换，扩展 factory 翻译 settings 并注册 slash autocomplete 显示层。
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
@@ -47,6 +47,15 @@ const SETTING_DESCRIPTION_TEMPLATES: readonly SettingDescriptionTemplate[] = [
 		key: "Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
 		parts: [
 			"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target. Native text selection becomes ",
+			"+drag and wheel scroll becomes ",
+			"+wheel while on",
+		],
+		captures: ["shift", "shift"],
+	},
+	{
+		key: "Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target, and clicks on extension-owned links reach their extension (the link-hint key picks them without the mouse). Native text selection becomes {shift}+drag and wheel scroll becomes {shift}+wheel while on",
+		parts: [
+			"Capture mouse clicks in the main session so live subagent cards and HUD rows focus on click, with a hover highlight on the target, and clicks on extension-owned links reach their extension (the link-hint key picks them without the mouse). Native text selection becomes ",
 			"+drag and wheel scroll becomes ",
 			"+wheel while on",
 		],
@@ -493,7 +502,7 @@ function prepareSetting(
 		if (optionDescription !== undefined && typeof optionDescription !== "string") {
 			invalidHost(`setting ${value.id} option ${optionIndex} has an invalid description`);
 		}
-		prepareMetadataField(option, "label", optionLabel, dictionary, changes, preparedFields);
+		if (optionLabel !== optionValue) prepareMetadataField(option, "label", optionLabel, dictionary, changes, preparedFields);
 		prepareMetadataField(option, "description", optionDescription, dictionary, changes, preparedFields);
 	}
 }
@@ -603,11 +612,21 @@ const BUNDLED_SLASH_COMMAND_DESCRIPTIONS: Readonly<Record<string, string>> = {
 	autoresearch: "Toggle builtin autoresearch mode, or pass off / clear, or a goal message.",
 };
 
+const SLASH_DESCRIPTION_VARIANTS: Readonly<Record<string, readonly string[]>> = {
+	"Annotate local changes, a GitHub pull request, or a GitLab merge request": [
+		"Annotate local changes or a GitHub pull request",
+	],
+	"Annotate local changes or a GitHub pull request": [
+		"Annotate local changes, a GitHub pull request, or a GitLab merge request",
+	],
+
+};
+
 const BUNDLED_SLASH_ARGUMENT_DESCRIPTIONS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 	annotate: {
 		"last ": "Annotate the latest assistant reply",
 		"session ": "Annotate a message or code block from this session",
-		"code-review ": "Annotate local changes or a GitHub pull request",
+		"code-review ": "Annotate local changes, a GitHub pull request, or a GitLab merge request",
 		"./": "Annotate a file by path",
 		'"': "Annotate literal prompt text",
 	},
@@ -780,19 +799,23 @@ function translateStaticDisplayText(
 	dictionary: Dictionary,
 	argumentHint?: string,
 ): string | undefined {
-	const translated = translateText(dictionary, source);
-	if (translated === source) return undefined;
 	let text = value;
 	let suffix = "";
 	if (text.endsWith(BUNDLED_DESCRIPTION_SUFFIX)) {
 		suffix = BUNDLED_DESCRIPTION_SUFFIX;
 		text = text.slice(0, -BUNDLED_DESCRIPTION_SUFFIX.length);
 	}
-	if (text === source) return `${translated}${suffix}`;
-	if (!argumentHint) return undefined;
-	// Match the host formatter exactly; other prefixes remain part of the source description.
-	const prefix = `${argumentHint} - `;
-	if (!text.startsWith(prefix) || text.slice(prefix.length) !== source) return undefined;
+	let prefix = "";
+	if (argumentHint) {
+		const argumentPrefix = `${argumentHint} - `;
+		if (text.startsWith(argumentPrefix)) {
+			prefix = argumentPrefix;
+			text = text.slice(argumentPrefix.length);
+		}
+	}
+	if (text !== source && !SLASH_DESCRIPTION_VARIANTS[source]?.includes(text)) return undefined;
+	const translated = translateText(dictionary, text);
+	if (translated === text) return undefined;
 	return `${prefix}${translated}${suffix}`;
 }
 
@@ -1053,8 +1076,9 @@ export function isTranslationEnabled(environment: Environment = process.env): bo
 export async function preparePreloadDisplayTranslations(launchConfig: LaunchConfig, configPath: string): Promise<void> {
 	if (!isTranslationEnabled()) return;
 	const diagnostics = await loadInstalledDiagnostics(configPath);
+	let dictionary: Dictionary;
 	try {
-		const dictionary = loadDictionary(process.env, launchConfig.dictPath, diagnostics.reportDiagnostic);
+		dictionary = loadDictionary(process.env, launchConfig.dictPath, diagnostics.reportDiagnostic);
 		if (Object.keys(dictionary).length === 0) return;
 		const settingsUiPath = join(dirname(configPath), "settings-ui.ts");
 		const settingsUi: unknown = await import(pathToFileURL(settingsUiPath).href);
@@ -1070,6 +1094,18 @@ export async function preparePreloadDisplayTranslations(launchConfig: LaunchConf
 		settingsUi.registerSettingsUiTranslation(launchConfig.host.settingsUiPath, dictionary);
 	} catch (error) {
 		diagnostics.reportDiagnostic(`汉化预加载跳过: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+	try {
+		const menuUiPath = join(dirname(configPath), "menu-ui.ts");
+		// Keep the optional menu module isolated so its load failure cannot suppress prior transforms.
+		const menuUi: unknown = await import(pathToFileURL(menuUiPath).href);
+		if (!isRecord(menuUi) || typeof menuUi.registerMenuTranslations !== "function") {
+			throw new Error("Installed menu translation module is unavailable; reinstall zhomp");
+		}
+		menuUi.registerMenuTranslations(launchConfig.host, dictionary);
+	} catch (error) {
+		diagnostics.reportDiagnostic(`菜单汉化预加载跳过: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
