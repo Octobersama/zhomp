@@ -293,7 +293,7 @@ V10 的 ordinary／translated／hostile 实际消费验证英文搜索、原始�
 
 后续审查复核收紧了启动探针的分平台 IPC 识别：Windows 只接受明确的本机命名管道前缀，POSIX 才接受本地 Unix socket 路径。12 个策略输入用例通过；这是平台参数模拟，不作为 Linux／macOS 实机证据。Windows 上 OMP 18.12.6 和 18.3.2 的真实 StartupUI 对照均重新通过。另补齐扩展详情的折叠参数数量及展开提示，实际 ANSI／native 消费验证中文数量、原参数名／描述和展开后内容不变。此次定向类型检查、5 个菜单／字典测试及严格 69 模块检查通过，重新部署后生产参数界面和目录导入复验也通过；没有重跑未受影响的完整矩阵。
 
-### 18.14.0／Bun 1.4.4 适配验收（当前）
+### 18.14.0／Bun 1.4.4 首轮本机适配验收
 
 Windows／Bun 1.4.4／OMP 18.14.0：类型检查及 48 个行为测试通过，真实 SettingsHost 的 431 个条目完成语义字典覆盖。V01–V09 通过，修复后 V10 定向复验通过，无 SKIP；覆盖真实 SettingsSelector／ModelHub、斜杠补全、Git 和启动 CLI，以及菜单的 ordinary／translated／hostile 消费。严格目录验证 73 个模块全部匹配、编译并经已安装 preload 导入，缺失、不支持和诊断均为空。
 
@@ -307,11 +307,22 @@ V11 的真实解包安装消费门禁通过；移除已安装 `model-text.ts` �
 
 已通过 PowerShell 官方入口部署到 `%USERPROFILE%\.omp\zh` 及对应扩展目录。直接指定生产 `launch.json`，用临时目录复验严格 73 模块导入、SettingsSelector／autocomplete、会话／OAuth 选择器、ContextViewer、批注草稿／local 文件选择及 SetupWizard，六个消费探针全部退出 0。未重启或终止已有 OMP；新启动的 zhomp 使用本次产物。旧版完整运行时、其他 OS 与远端 Actions 本轮未执行。
 
+### GitHub Actions 与隔离部署验收（当前）
+
+临时 CI 分支 `ci/omp-18.14.0-validation-20261031` 的候选 `40e8460` 通过 [Verify #11](https://github.com/Octobersama/zhomp/actions/runs/41125283113)：Windows／Linux／macOS × OMP 18.3.2／latest，六个矩阵任务全部成功。各任务均执行类型检查、50 个行为测试、完整 V01–V11 和空白检查；Bun 固定为 1.4.4。首次 #9 暴露的最低宿主 Git 未跟踪文件断言、欢迎框边框误识别，以及旧终端响应器不支持构造选项的问题均已修复；#10 和补齐子进程守卫校验后的 #11 先后全绿。
+
+StartupUI 的守卫现在同时覆盖真实 launcher 和 OMP 子进程，并校验实际入口身份。Windows 首次标准光标回复过滤由测试共用 helper 负责，不依赖宿主响应器接受新构造选项；POSIX 及后续回复不变。启动探针只发送 Ctrl+D，退出前必须确认真正的输入框为空，宿主后台网络尝试保持单独记录，不再以父进程零日志推断子进程没有请求。
+
+CI 通过后，用 PowerShell 官方入口安装到本机独立临时根，在过滤凭据且阻断网络的后台子进程运行八个探针：严格 73 模块导入、SettingsSelector／autocomplete（431 条目）、ModelHub、会话／OAuth 选择器、ContextViewer、批注／local 文件菜单、SetupWizard，以及真实官方／汉化 Git CLI。八个探针均退出 0，本轮网络尝试为零；Git 的 launcher 与 OMP 子进程均验证守卫已加载，两个 CLI 均正常退出且文件和索引不变。这是实际组件消费及独立 Git PTY 验收，不冒充完整主会话终端的逐项菜单交互。此前临时主会话脚本捕获的后台 POST 已阻断，该次失败没有记为通过。
+
+随后重新部署到本机生产目录，并直接以生产 `launch.json` 复验目录、SettingsSelector／autocomplete、ModelHub、ContextViewer 四个隔离消费探针，全部退出 0、网络尝试为零。没有重启／终止已有 OMP，也没有在当前终端启动交互界面。远端仅推送已授权的 CI 分支，`main` 保留为本地提交，不推送。
+
+
 
 
 发布包必须包含本指南、README、许可证、`install-manifest.tsv`、字典、扩展、两个安装/卸载入口及安装核心，以及清单中列出的全部运行文件。安装路径表列明各显示目录的用途；新增运行文件必须登记到自有产物清单，安装、无 Bun 卸载及发布完整性验收共同消费它。斜杠补全显示层仍嵌在现有扩展中。解包后需检查本地链接、安装命令及实际汉化消费链，不能以打包退出码或 `--version` 代替汉化证明。
 
-历史本机验收（2.0.0）覆盖 OMP 18.3.2、Windows/PowerShell 5.1/cmd/Git Bash；2.1.0 本机 OMP 18.4.1 的 SettingsSelector 验证 entries=387 且动态描述中文可见。此前审查改进轮在 Windows 的 OMP 18.3.2、18.4.12 上通过 21 个行为测试及 V01–V11，SettingsSelector 分别渲染 entries=385 和 397。CI 覆盖 Windows/Linux/macOS 的最低版与当期最新版；本轮没有远端 CI 或其他 OS 验证结果，不应据此声称已通过。
+历史本机验收（2.0.0）覆盖 OMP 18.3.2、Windows/PowerShell 5.1/cmd/Git Bash；2.1.0 本机 OMP 18.4.1 的 SettingsSelector 验证 entries=387 且动态描述中文可见。此前审查改进轮在 Windows 的 OMP 18.3.2、18.4.12 上通过 21 个行为测试及 V01–V11，SettingsSelector 分别渲染 entries=385 和 397。当前跨平台验收以本节链接的实际 Actions 运行及对应提交为准。
 
 ## 已知限制
 
