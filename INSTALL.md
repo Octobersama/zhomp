@@ -293,19 +293,21 @@ V10 的 ordinary／translated／hostile 实际消费验证英文搜索、原始�
 
 后续审查复核收紧了启动探针的分平台 IPC 识别：Windows 只接受明确的本机命名管道前缀，POSIX 才接受本地 Unix socket 路径。12 个策略输入用例通过；这是平台参数模拟，不作为 Linux／macOS 实机证据。Windows 上 OMP 18.12.6 和 18.3.2 的真实 StartupUI 对照均重新通过。另补齐扩展详情的折叠参数数量及展开提示，实际 ANSI／native 消费验证中文数量、原参数名／描述和展开后内容不变。此次定向类型检查、5 个菜单／字典测试及严格 69 模块检查通过，重新部署后生产参数界面和目录导入复验也通过；没有重跑未受影响的完整矩阵。
 
-### 18.14.0／Bun 1.4.4 首轮本机适配验收
+### 18.14.0／Bun 1.4.4 首轮本机适配验收（历史阶段）
+
+本节记录首次本机验证当时的结果；后续终端探针修正、跨平台 Actions 和最终部署结果见下一节“GitHub Actions 与隔离部署验收（当前）”。
 
 Windows／Bun 1.4.4／OMP 18.14.0：类型检查及 48 个行为测试通过，真实 SettingsHost 的 431 个条目完成语义字典覆盖。V01–V09 通过，修复后 V10 定向复验通过，无 SKIP；覆盖真实 SettingsSelector／ModelHub、斜杠补全、Git 和启动 CLI，以及菜单的 ordinary／translated／hostile 消费。严格目录验证 73 个模块全部匹配、编译并经已安装 preload 导入，缺失、不支持和诊断均为空。
 
 新增 `/context` 探针实际执行概览→分类→条目的 ANSI／native 浏览，核对分类／条目 ID、英文搜索标签、原始正文、来源路径、调用 ID、token 数值和只读状态；恶意字典不执行注入。会话重命名取消不触发持久化，固定操作返回原会话及布尔值；批注草稿从真实来源菜单进入，选择器返回原始 `labels[]` 字符串，恢复原草稿且不改正文；`/local` 文件菜单取消不启动编辑器。新版 native 设置启动提示单独验证 `Press`／原生 `enter`／`to begin`，不套用 ANSI 的跳过提示。向导验收没有配置写入、登录或偏好保存。
 
-OMP 18.12.6 缓存中的 11 个受影响旧模块另外通过精确转换和编译检查；这是源码兼容检查，不是旧版完整运行时矩阵。当前本机结果不代表 Linux／macOS 或远端 Actions。
+OMP 18.12.6 缓存中的 11 个受影响旧模块另外通过精确转换和编译检查；这是源码兼容检查，不是旧版完整运行时矩阵。此次首次本机验证不代表 Linux／macOS 或远端 Actions。
 
 V11 的真实解包安装消费门禁通过；移除已安装 `model-text.ts` 会使 ModelHub 探针失败。启动验收曾因重复回答 ConPTY 的首次光标查询而向输入框插入字符，已改用宿主 `TerminalQueryResponder`；Windows 仅跳过宿主已回答的首次查询，其他平台继续响应，旧宿主没有该导出时保留原响应路径。最终官方／汉化启动探针在确认输入框为空后仅发送 Ctrl+D，正常退出；网络阻断仍开启，官方启动自身被拦截的 fetch 尝试另行计数，不作为无网络尝试的证据。
 
 终端协商修正后的最终工作区再次执行 `MENU_CATALOG_REQUIRE_ALL=1` 的 V10：73 模块严格目录、普通／中文／恶意字典三模式及实际 Git／Startup CLI 全部通过，无 SKIP；V11 解包消费也通过。最终类型检查通过，48 个行为测试为零失败。生产部署后的六个轻量消费检查使用生产 `launch.json`，没有以仓库副本代替部署副本。
 
-已通过 PowerShell 官方入口部署到 `%USERPROFILE%\.omp\zh` 及对应扩展目录。直接指定生产 `launch.json`，用临时目录复验严格 73 模块导入、SettingsSelector／autocomplete、会话／OAuth 选择器、ContextViewer、批注草稿／local 文件选择及 SetupWizard，六个消费探针全部退出 0。未重启或终止已有 OMP；新启动的 zhomp 使用本次产物。旧版完整运行时、其他 OS 与远端 Actions 本轮未执行。
+首次本机验证后已通过 PowerShell 官方入口部署到 `%USERPROFILE%\.omp\zh` 及对应扩展目录。直接指定生产 `launch.json`，用临时目录复验严格 73 模块导入、SettingsSelector／autocomplete、会话／OAuth 选择器、ContextViewer、批注草稿／local 文件选择及 SetupWizard，六个消费探针全部退出 0。未重启或终止已有 OMP；新启动的 zhomp 使用当次产物。该历史阶段尚未执行旧版完整运行时及跨平台 Actions，后续完成记录见下一节。
 
 ### GitHub Actions 与隔离部署验收（当前）
 
