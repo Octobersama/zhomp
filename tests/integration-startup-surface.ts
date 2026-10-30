@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import type { MenuModule } from "../runtime/menu-catalog";
 import type { LaunchConfig } from "../runtime/host";
 import { createPtyReplyWriter } from "./terminal-replies";
+import { sameFileSystemEntry } from "./verification-fixtures";
 
 interface PtyResult { exitCode?: number; cancelled: boolean; timedOut: boolean }
 interface PtySession {
@@ -81,6 +82,17 @@ net.createConnection = (...args) => localIpc(args) ? nativeCreateConnection(...a
 net.Socket.prototype.connect = function (...args) { return localIpc(args) ? nativeSocketConnect.apply(this, args) : blocked("tcp"); };
 const tls = require("node:tls");
 tls.connect = (...args) => blocked("tls");
+const nativeSpawn = Bun.spawn;
+const guardedSpawn = function (...args) {
+	const argv = args[0];
+	if (Array.isArray(argv) && argv[0] === process.execPath && !argv.includes(__filename)) {
+		args[0] = [argv[0], "--preload", __filename, ...argv.slice(1)];
+	}
+	return nativeSpawn.apply(this, args);
+};
+Bun.spawn = guardedSpawn;
+if (Bun.spawn !== guardedSpawn) throw new Error("Could not guard the startup child process");
+fs.appendFileSync(log, JSON.stringify({ kind: "guard", host: "", entry: Bun.main }) + "\\n");
 `);
 
 const baseEnv: Record<string, string> = {};
@@ -90,7 +102,7 @@ for (const [key, value] of Object.entries(process.env)) {
 	}
 }
 
-async function captureStartup(official: boolean): Promise<{ official: boolean; translated: boolean; sourceSupported: boolean; title: string; changelog: string; blockedNetworkAttempts: { fetch: number; tcp: number; tls: number }; blockedFetchHosts: string[] }> {
+async function captureStartup(official: boolean): Promise<{ official: boolean; translated: boolean; sourceSupported: boolean; title: string; changelog: string; guardedEntryPoints: string[]; blockedNetworkAttempts: { fetch: number; tcp: number; tls: number }; blockedFetchHosts: string[] }> {
 	const childRoot = join(root, official ? "official" : "translated");
 	const childAgentDir = join(childRoot, "agent");
 	const cwd = join(childRoot, "work");
@@ -160,15 +172,19 @@ async function captureStartup(official: boolean): Promise<{ official: boolean; t
 		assert.equal(result.exitCode, 0, `Unexpected startup PTY exit (${JSON.stringify(result)}):\n${lastFrame}`);
 		assert.equal(result.cancelled, false, `Startup PTY was cancelled:\n${lastFrame}`);
 		assert.equal(result.timedOut, false, `Startup PTY timed out:\n${lastFrame}`);
-		const blockedEvents = readFileSync(networkBlockLog, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line) as { kind: string; host: string });
+		const blockedEvents = readFileSync(networkBlockLog, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line) as { kind: string; host: string; entry?: string });
 		const newBlockedEvents = blockedEvents.slice(blockedEventsBefore.length);
+		const guardedEntryPoints = [...new Set(newBlockedEvents.flatMap(event => event.kind === "guard" && typeof event.entry === "string" ? [event.entry] : []))];
+		const guarded = (entry: string): boolean => guardedEntryPoints.some(path => sameFileSystemEntry(path, entry));
+		assert.ok(guarded(official ? launch.host.cliPath : join(installDir, "launch.ts")), "The startup entry must load its network guard");
+		assert.ok(guarded(launch.host.cliPath), "The actual OMP child must load its network guard");
 		const blockedNetworkAttempts = {
 			fetch: newBlockedEvents.filter(event => event.kind === "fetch").length,
 			tcp: newBlockedEvents.filter(event => event.kind === "tcp").length,
 			tls: newBlockedEvents.filter(event => event.kind === "tls").length,
 		};
 		const blockedFetchHosts = [...new Set(newBlockedEvents.filter(event => event.kind === "fetch").map(event => event.host))].sort();
-		return { official, translated, sourceSupported, title, changelog: `Updated to v${launch.host.version}`, blockedNetworkAttempts, blockedFetchHosts };
+		return { official, translated, sourceSupported, title, changelog: `Updated to v${launch.host.version}`, guardedEntryPoints, blockedNetworkAttempts, blockedFetchHosts };
 	} finally {
 		clearTimeout(deadline);
 		if (running && !completed) {
