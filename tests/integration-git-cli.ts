@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { LaunchConfig } from "../runtime/host";
 import { runCommand } from "./verification-fixtures";
+import { createPtyReplyWriter } from "./terminal-replies";
 
 interface PtyResult { exitCode?: number; cancelled: boolean; timedOut: boolean }
 interface PtySession {
@@ -29,12 +30,17 @@ const installDir = dirname(configPath);
 const hostApi = await import(pathToFileURL(join(installDir, "host.ts")).href) as { readLaunchConfig(path: string): LaunchConfig };
 const launch = hostApi.readLaunchConfig(configPath);
 const native = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-natives", launch.host.packageDir)).href) as { PtySession: new () => PtySession };
-const vterm = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-utils/vterm", launch.host.packageDir)).href) as { default: { Terminal: new (options: { cols: number; rows: number; scrollback: number; disableStdin: boolean }) => VirtualTerminal } };
+const vterm = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-utils/vterm", launch.host.packageDir)).href) as {
+	TerminalQueryResponder?: new () => { feed(chunk: string): string };
+	default: { Terminal: new (options: { cols: number; rows: number; scrollback: number; disableStdin: boolean }) => VirtualTerminal };
+};
 const catalogue = await import(pathToFileURL(join(installDir, "menu-catalog.ts")).href) as { MENU_MODULES: readonly import("../runtime/menu-catalog").MenuModule[] };
 const translator = await import(pathToFileURL(join(installDir, "menu-ui.ts")).href) as { translateMenuSource(source: string, module: import("../runtime/menu-catalog").MenuModule, dictionary: Readonly<Record<string, string>>): { supported: boolean } };
 const dictionary = JSON.parse(readFileSync(launch.dictPath, "utf8")) as Record<string, string>;
-const sidebar = catalogue.MENU_MODULES.find(module => module.root === "tui" && module.path === "src/apps/git/sidebar.ts");
-const sourceSupported = sidebar !== undefined && translator.translateMenuSource(readFileSync(join(launch.host.tuiDir, sidebar.path), "utf8"), sidebar, dictionary).supported;
+const gitUi = catalogue.MENU_MODULES.find(module => module.root === "tui" && module.path === "src/apps/git/git-tui.ts");
+const sourceSupported = gitUi !== undefined && translator.translateMenuSource(readFileSync(join(launch.host.tuiDir, gitUi.path), "utf8"), gitUi, dictionary).supported;
+const translatedBadge = dictionary.Untracked;
+assert.ok(typeof translatedBadge === "string" && translatedBadge.length > 0, "The shipped Git dictionary must cover Untracked");
 const emptyConfig = join(root, "empty.gitconfig");
 writeFileSync(emptyConfig, "");
 const env: Record<string, string> = {};
@@ -53,7 +59,9 @@ async function captureGit(official: boolean): Promise<{ official: boolean; trans
 	const terminal = new vterm.default.Terminal({ cols: 160, rows: 50, scrollback: 200, disableStdin: true });
 	let completed = false;
 	let running: Promise<PtyResult> | undefined;
-	const replies = terminal.onData(data => { if (running && !completed) pty.write(data); });
+	const writeReply = createPtyReplyWriter(data => { if (running && !completed) pty.write(data); });
+	const queryResponder = vterm.TerminalQueryResponder ? new vterm.TerminalQueryResponder() : undefined;
+	const replies = queryResponder ? undefined : terminal.onData(writeReply);
 	const ready = Promise.withResolvers<string>();
 	let deadline: NodeJS.Timeout | undefined;
 	let lastFrame = "";
@@ -62,22 +70,27 @@ async function captureGit(official: boolean): Promise<{ official: boolean; trans
 		const entry = official ? launch.host.cliPath : join(installDir, "launch.ts");
 		running = pty.startArgv({ application: process.execPath, args: ["--no-install", "--no-env-file", `--config=${join(installDir, "zhomp.toml")}`, entry, "git", "-C", fixture], cwd: fixture, env, cols: 160, rows: 50, timeoutMs: 50_000 }, (error, chunk) => {
 			if (error) { ready.reject(error); return; }
+			const reply = queryResponder?.feed(chunk);
+			if (reply) writeReply(reply);
 			terminal.write(chunk, () => {
 				const buffer = terminal.buffer.active;
 				lastFrame = Array.from({ length: 50 }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "").join("\n");
-				if (lastFrame.includes("fixture.txt") && lastFrame.includes("fixture-branch") && lastFrame.includes("Settings high provider/id")) ready.resolve(lastFrame);
+				if (lastFrame.includes("fixture.txt") && lastFrame.includes("fixture-branch") && lastFrame.includes("Settings high provider/id") &&
+					(lastFrame.includes("Untracked") || lastFrame.includes(translatedBadge))) ready.resolve(lastFrame);
 			});
 		}).finally(() => { completed = true; });
 		const frame = await Promise.race([ready.promise, running.then(result => { throw new Error(`Git CLI exited before a frame (${result.exitCode}):\n${lastFrame}`); })]);
 		clearTimeout(deadline);
-		const translated = frame.includes("未暂存");
-		if (official || !sourceSupported) assert.match(frame, /Unstaged/i, frame);
-		else assert.equal(translated, true, `The installed zhomp git route missed its menu preload:\n${frame}`);
+		// The fixture is an untracked file, so assert its own badge rather than an unrelated section heading.
+		const translated = frame.includes(translatedBadge);
+		const expectedBadge = official || !sourceSupported ? "Untracked" : translatedBadge;
+		assert.ok(frame.includes(expectedBadge), `Git CLI missed its expected ${JSON.stringify(expectedBadge)} badge:\n${frame}`);
 		assert.equal(official && translated, false, "Official omp git must retain English copy");
 		pty.write("q");
 		const result = await running;
 		assert.equal(result.exitCode, 0, JSON.stringify(result));
 		assert.equal(result.cancelled, false);
+		assert.equal(result.timedOut, false);
 		const status = await runCommand("git", ["status", "--porcelain"], { cwd: fixture, env });
 		assert.equal(status.stdout.trim(), "?? fixture.txt", "Read-only Git UI navigation changed the index or working tree");
 		return { official, translated, exitCode: result.exitCode, sourceSupported };
@@ -89,7 +102,7 @@ async function captureGit(official: boolean): Promise<{ official: boolean; trans
 			if (!completed) pty.kill();
 			await running;
 		}
-		replies.dispose();
+		replies?.dispose();
 		terminal.dispose();
 	}
 }

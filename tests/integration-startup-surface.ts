@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { MenuModule } from "../runtime/menu-catalog";
 import type { LaunchConfig } from "../runtime/host";
+import { createPtyReplyWriter } from "./terminal-replies";
 
 interface PtyResult { exitCode?: number; cancelled: boolean; timedOut: boolean }
 interface PtySession {
@@ -25,6 +26,7 @@ function requireString(value: unknown, label: string): string {
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string`);
 	return value;
 }
+const composerLinePattern = /^╰─(?:\s|$)/;
 
 const configPath = process.env.OMP_ZH_CONFIG;
 const root = requireString(process.env.PROBE_DIR, "PROBE_DIR");
@@ -35,7 +37,7 @@ const hostApi = await import(pathToFileURL(join(installDir, "host.ts")).href) as
 const launch = hostApi.readLaunchConfig(configPath);
 const native = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-natives", launch.host.packageDir)).href) as { PtySession: new () => PtySession };
 const vterm = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-utils/vterm", launch.host.packageDir)).href) as {
-	TerminalQueryResponder?: new (options: { hostCursorHandshake: boolean }) => { feed(chunk: string): string };
+	TerminalQueryResponder?: new () => { feed(chunk: string): string };
 	default: { Terminal: new (options: { cols: number; rows: number; scrollback: number; disableStdin: boolean }) => VirtualTerminal };
 };
 const catalog = await import(pathToFileURL(join(installDir, "menu-startup.ts")).href) as { STARTUP_MENU_MODULES: readonly MenuModule[] };
@@ -114,11 +116,10 @@ async function captureStartup(official: boolean): Promise<{ official: boolean; t
 	const terminal = new vterm.default.Terminal({ cols: 160, rows: 50, scrollback: 200, disableStdin: true });
 	let completed = false;
 	let running: Promise<PtyResult> | undefined;
-	const queryResponder = vterm.TerminalQueryResponder
-		? new vterm.TerminalQueryResponder({ hostCursorHandshake: process.platform === "win32" })
-		: undefined;
+	const writeReply = createPtyReplyWriter(reply => { if (running && !completed) pty.write(reply); });
+	const queryResponder = vterm.TerminalQueryResponder ? new vterm.TerminalQueryResponder() : undefined;
 	// Older hosts expose only the full terminal's response stream.
-	const legacyReplies = queryResponder ? undefined : terminal.onData(data => { if (running && !completed) pty.write(data); });
+	const legacyReplies = queryResponder ? undefined : terminal.onData(writeReply);
 	const ready = Promise.withResolvers<string>();
 	let deadline: NodeJS.Timeout | undefined;
 	let lastFrame = "";
@@ -132,11 +133,12 @@ async function captureStartup(official: boolean): Promise<{ official: boolean; t
 		running = pty.startArgv({ application: process.execPath, args, cwd, env, cols: 160, rows: 50, timeoutMs: 40_000 }, (error, chunk) => {
 			if (error) { ready.reject(error); return; }
 			const replies = queryResponder?.feed(chunk);
-			if (replies) pty.write(replies);
+			if (replies) writeReply(replies);
 			terminal.write(chunk, () => {
 				const buffer = terminal.buffer.active;
 				lastFrame = Array.from({ length: 50 }, (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "").join("\n");
-				if (lastFrame.includes(title) && lastFrame.includes(`Updated to v${launch.host.version}`) && lastFrame.includes("╰─")) ready.resolve(lastFrame);
+				const hasComposer = lastFrame.split("\n").some(line => composerLinePattern.test(line));
+				if (lastFrame.includes(title) && lastFrame.includes(`Updated to v${launch.host.version}`) && hasComposer) ready.resolve(lastFrame);
 			});
 		}).finally(() => { completed = true; });
 		const frame = await Promise.race([ready.promise, running.then(result => { throw new Error(`Startup UI exited before a changelog frame (official=${official}, exitCode=${result.exitCode}, timedOut=${result.timedOut}):\n${lastFrame}`); })]);
@@ -146,7 +148,7 @@ async function captureStartup(official: boolean): Promise<{ official: boolean; t
 		else assert.ok(translated, `The installed zhomp startup route missed its heading translation:\n${frame}`);
 		assert.ok(frame.includes(`Updated to v${launch.host.version}`), `Startup changelog summary changed or is missing:\n${frame}`);
 		await Bun.sleep(1_000);
-		const composerLine = lastFrame.split("\n").find(line => line.includes("╰─"));
+		const composerLine = lastFrame.split("\n").find(line => composerLinePattern.test(line));
 		assert.ok(composerLine, `Startup UI did not expose an input composer (official=${official}):\n${lastFrame}`);
 		const composerText = composerLine.slice(composerLine.indexOf("╰─") + 2).replace(/\s+⇧⇥.*$/, "").trim();
 		assert.equal(composerText, "", `Startup UI input composer was not empty before control exit (official=${official}):\n${lastFrame}`);
