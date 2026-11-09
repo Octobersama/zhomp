@@ -76,6 +76,7 @@ const DASHBOARD_MENU_TEXT = [
 	"Missing host. {usage}", "Unknown option: {option}. {usage}",
 	"models", "{model} · {tools} · review {mode}/{count}",
 	"{scroll}{refresh}{cancel} back", "{scroll}{refresh}{key} details · {cancel} close",
+	"{scroll}{refresh}{key} overview · {cancel} back",
 	"No activity yet", "No usage report came back for {accounts}: the sign-in expired, the request failed, or the plan has no quotas",
 "{pct}% used", "resets", "{count} in", "{count} out", "{count} cache", "on", "off", "(unnamed)", "This advisor",
 "{count} more", "(end)", "{count} reset banked", "{count} resets banked",
@@ -132,7 +133,6 @@ exact('`${theme.bold(theme.fg("accent", "Activity"))} ${theme.fg("dim", `${forma
 	exact('this.#refreshing\n\t\t\t? "refreshing…"', 'this.#refreshing\n\t\t\t? __zhompMenuText("refreshing…")'),
 	exact('const scrollHint = maxScroll > 0 ? `${editorKeys("tui.select.up", "tui.select.down")} scroll · ` : "";', 'const scrollHint = maxScroll > 0 ? __zhompMenuText("{keys} scroll · ", { keys: editorKeys("tui.select.up", "tui.select.down") }) : "";'),
 	exact('this.#options.refresh ? "r refresh · " : ""', 'this.#options.refresh ? __zhompMenuText("r refresh · ") : ""'),
-	exact('`${scrollHint}${refreshHint}${cancel} back`', '__zhompMenuText("{scroll}{refresh}{cancel} back", { scroll: scrollHint, refresh: refreshHint, cancel })'),
 	exact('`${scrollHint}${refreshHint}${formatKeyHint("enter")} details · ${cancel} close`', '__zhompMenuText("{scroll}{refresh}{key} details · {cancel} close", { scroll: scrollHint, refresh: refreshHint, key: formatKeyHint("enter"), cancel })'),
 	exact('actionButton("Close", "close", this.#view === "overview"', 'actionButton(__zhompMenuText("Close"), "close", this.#view === "overview"'),
 	exact('label: [span("Refreshing…", "dim")]', 'label: [span(__zhompMenuText("Refreshing…"), "dim")]'),
@@ -200,7 +200,10 @@ const usageDashboardVariants: readonly (readonly MenuPatch[])[] = [
 		exact('text: `resets in ${formatDuration(resetMs)}`', 'text: __zhompMenuText("resets in {duration}", { duration: formatDuration(resetMs) })'),
 		exact('title: `Resets ${shortDate(at)} ${at.getFullYear()}, ${clockTime(at)}`', 'title: __zhompMenuText("Resets {date} {year}, {time}", { date: shortDate(at), year: at.getFullYear(), time: clockTime(at) })'),
 	],
-];
+].flatMap(patches => [
+	[...patches, exact('`${scrollHint}${refreshHint}${cancel} back`', '__zhompMenuText("{scroll}{refresh}{cancel} back", { scroll: scrollHint, refresh: refreshHint, cancel })')],
+	[...patches, exact('`${scrollHint}${refreshHint}${formatKeyHint("tab")} overview · ${cancel} back`', '__zhompMenuText("{scroll}{refresh}{key} overview · {cancel} back", { scroll: scrollHint, refresh: refreshHint, key: formatKeyHint("tab"), cancel })')],
+]);
 
 const usageDisplayPatches: readonly MenuPatch[] = [
 	exact('`cooldown until ${reset.cooldownUntil}`', '__zhompMenuText("cooldown until {time}", { time: reset.cooldownUntil })'),
@@ -342,9 +345,7 @@ const jobsPanelPatches: readonly MenuPatch[] = [
 	exact('actionButton("Close", "close",', 'actionButton(__zhompMenuText("Close"), "close",'),
 	exact('truncateToWidth(` Background jobs · ${running} running`, width)', 'truncateToWidth(` ${__zhompMenuText("Background jobs")} · ${__zhompMenuText("{count} running", { count: running })}`, width)'),
 	exact('lines.push(" No background jobs")', 'lines.push(` ${__zhompMenuText("No background jobs")}`)'),
-	exact('`${cursor} ${guide}${job.status}  ${job.type} ${age}  ${agent}${collapseCommand(job.label)}`', '`${cursor} ${guide}${__zhompMenuText(STATUS_LABEL[job.status])}  ${job.type} ${age}  ${agent}${collapseCommand(job.label)}`'),
-	exact('title: `${job.label}\\n${status} · ${job.type} · ${job.id}`', 'title: `${job.label}\\n${__zhompMenuText("{status} · {type} · {id}", { status, type: job.type, id: job.id })}`'),
-	exact('aria: `${job.label}, ${status.toLowerCase()}, ${age}`', 'aria: __zhompMenuText("{label}, {status}, {age}", { label: job.label, status, age })'),
+	exact('\\n${status} · ${job.type} · ${job.id}', '\\n${__zhompMenuText("{status} · {type} · {id}", { status, type: job.type, id: job.id })}'),
 	exact('running > 0 && `${running} running`', 'running > 0 && __zhompMenuText("{count} running", { count: running })'),
 	exact('jobs.length > running && `${jobs.length - running} recent`', 'jobs.length > running && __zhompMenuText("{count} recent", { count: jobs.length - running })'),
 	exact('text("No background jobs",', 'text(__zhompMenuText("No background jobs"),'),
@@ -358,6 +359,17 @@ const jobsPanelPatches: readonly MenuPatch[] = [
 	exact('actionButton("Cancel job", "cancel",', 'actionButton(__zhompMenuText("Cancel job"), "cancel",'),
 	exact('text("Output",', 'text(__zhompMenuText("Output"),'),
 	exact('text(settled ? "No output" : "No output yet",', 'text(settled ? __zhompMenuText("No output") : __zhompMenuText("No output yet"),'),
+];
+
+const jobsPanelVariants: readonly (readonly MenuPatch[])[] = [
+	[
+		exact('`${cursor} ${guide}${job.status}  ${job.type} ${age}  ${agent}${collapseCommand(job.label)}`', '`${cursor} ${guide}${__zhompMenuText(STATUS_LABEL[job.status])}  ${job.type} ${age}  ${agent}${collapseCommand(job.label)}`'),
+		exact('aria: `${job.label}, ${status.toLowerCase()}, ${age}`', 'aria: __zhompMenuText("{label}, {status}, {age}", { label: job.label, status: status.toLowerCase(), age })'),
+	],
+	[
+		exact('`${cursor} ${guide}${job.status}  ${job.type} ${age}  ${agent}${title}`', '`${cursor} ${guide}${__zhompMenuText(STATUS_LABEL[job.status])}  ${job.type} ${age}  ${agent}${title}`'),
+		exact('aria: `${job.intent ?? job.label}, ${status.toLowerCase()}, ${age}`', 'aria: __zhompMenuText("{label}, {status}, {age}", { label: job.intent ?? job.label, status: status.toLowerCase(), age })'),
+	],
 ];
 
 const reportPanelPatches: readonly MenuPatch[] = [
@@ -420,7 +432,7 @@ export const DASHBOARD_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/overlays/usage-dashboard.ts", patches: usageDashboardPatches, variants: usageDashboardVariants },
 	{ root: "tui", path: "src/overlays/usage-display.ts", patches: usageDisplayPatches },
 	{ root: "tui", path: "src/overlays/advisor-config.ts", patches: advisorConfigPatches },
-	{ root: "tui", path: "src/overlays/jobs-panel.ts", patches: jobsPanelPatches },
+	{ root: "tui", path: "src/overlays/jobs-panel.ts", patches: jobsPanelPatches, variants: jobsPanelVariants },
 	{ root: "tui", path: "src/overlays/report-panel.ts", patches: reportPanelPatches },
 	{ root: "tui", path: "src/overlays/pause-screen.ts", patches: pauseScreenPatches, variants: pauseScreenVariants },
 	{ root: "tui", path: "src/overlays/stats-notice.ts", patches: statsNoticePatches },

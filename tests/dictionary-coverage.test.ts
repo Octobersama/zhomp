@@ -119,7 +119,7 @@ function collectDisplayFields(
 
 const countUnits = String.raw`(?:(?:[KMG]\s+)?tokens?|items?|lines?|messages?|minutes?|mins?|seconds?|secs?|steps?|tasks?|turns?|requests?|retries?|reminders?|operations?|notes?|hours?|hrs?|days?|KB|MB|GB)`;
 const numericOrUnitText = new RegExp(
-	String.raw`^~?[-+]?\d+(?:\.\d+)?(?:\s*%|[x×]|[KMG]\s+tokens?|\s+${countUnits}|(?:ms|milliseconds?|s|m|h|d))?$`,
+	String.raw`^~?[-+]?\d+(?:\.\d+)?(?:\s*%|[x×]|[KMG]\s+tokens?|\s+${countUnits}|\s*(?:milliseconds?|ms|frames?/s|fps|s|m|h|d))?$`,
 	"i",
 );
 const preservedTechnicalText: Record<string, true> = {

@@ -52,6 +52,9 @@ const WIZARD_CURRENT_VARIANT: readonly SetupMenuPatch[] = [
 			'\t\tcase "model":',
 			'\t\t\tif (scene.step === "Model") return __zhompMenuText("Model");',
 			'\t\t\tbreak;',
+			'\t\tcase "auto-update":',
+			'\t\t\tif (scene.step === "Updates") return __zhompMenuText("Updates");',
+			'\t\t\tbreak;',
 			'\t\tcase "glyph-mode":',
 			'\t\t\tif (scene.step === "Symbols") return __zhompMenuText("Symbols");',
 			'\t\t\tbreak;',
@@ -218,6 +221,19 @@ const THEME_PATCHES: readonly SetupMenuPatch[] = [
 	patch('span("Editor", "muted")', `span(${menuText("Editor")}, "muted")`),
 ];
 
+const UPDATES_PATCHES: readonly SetupMenuPatch[] = [
+	patch(
+		'"Updates install through whatever installed omp: the standalone binary, Homebrew, mise, bun, or npm. Change this later in /settings."',
+		menuText("Updates install through whatever installed omp: the standalone binary, Homebrew, mise, bun, or npm. Change this later in /settings."),
+	),
+	patch('label: "1  Update automatically",', `label: ${menuText("1  Update automatically")},`),
+	patch('description: "Installs in the background; the next launch runs it"', `description: ${menuText("Installs in the background; the next launch runs it")}`),
+	patch('label: "2  Notify me",', `label: ${menuText("2  Notify me")},`),
+	patch('description: "Show a notice on startup; run omp update yourself"', `description: ${menuText("Show a notice on startup; run omp update yourself")}`),
+	patch('title = "Keep omp up to date";', `title = ${menuText("Keep omp up to date")};`),
+	patch('subtitle = "Choose how new releases reach you.";', `subtitle = ${menuText("Choose how new releases reach you.")};`),
+];
+
 export const SETUP_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/setup/wizard-overlay.ts", patches: WIZARD_PATCHES, variants: [WIZARD_OLD_VARIANT, WIZARD_CURRENT_VARIANT] },
 	{ root: "tui", path: "src/setup/scenes/splash.ts", patches: SPLASH_PATCHES, variants: [SPLASH_OLD_VARIANT, SPLASH_CURRENT_VARIANT] },
@@ -227,6 +243,7 @@ export const SETUP_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/setup/scenes/model.ts", patches: MODEL_PATCHES, variants: [MODEL_OLD_VARIANT, MODEL_CURRENT_VARIANT] },
 	{ root: "tui", path: "src/setup/scenes/sign-in.ts", patches: SIGN_IN_PATCHES, variants: [SIGN_IN_OLD_VARIANT, SIGN_IN_CURRENT_VARIANT] },
 	{ root: "tui", path: "src/setup/scenes/theme.ts", patches: THEME_PATCHES },
+	{ root: "tui", path: "src/setup/scenes/updates.ts", patches: UPDATES_PATCHES },
 ];
 export const SETUP_MENU_TEXT_KEYS: readonly string[] = [
 	"{navKeys} select · {confirm} confirm · {skip} skip · {exit} exit setup",
@@ -291,4 +308,12 @@ export const SETUP_MENU_TEXT_KEYS: readonly string[] = [
 	"Default model",
 	"Used by new sessions. Change it with /model.",
 	"You can connect more than one.",
+	"Updates install through whatever installed omp: the standalone binary, Homebrew, mise, bun, or npm. Change this later in /settings.",
+	"1  Update automatically",
+	"Installs in the background; the next launch runs it",
+	"2  Notify me",
+	"Show a notice on startup; run omp update yourself",
+	"Keep omp up to date",
+	"Choose how new releases reach you.",
+	"Updates",
 ];

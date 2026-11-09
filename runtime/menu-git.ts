@@ -55,10 +55,6 @@ const GIT_TUI_PATCHES: readonly GitMenuPatch[] = [
 		`actionButton(file.area === "unstaged" ? ${menuText("Stage file")} : ${menuText("Unstage file")}, "stage-file", {`),
 	patch('title: `${file.area === "unstaged" ? "Stage" : "Unstage"} ${file.path}`',
 		'title: ' + menuText("{action} {path}", '{ action: file.area === "unstaged" ? ' + menuText("Stage") + ' : ' + menuText("Unstage") + ', path: file.path }')),
-	patch('iconButton("chev-up", "prev-hunk", `Previous change (${formatTooltipKey("alt+up")})`)',
-		`iconButton("chev-up", "prev-hunk", ${menuText("Previous change ({key})", '{ key: formatTooltipKey("alt+up") }')})`),
-	patch('iconButton("chev", "next-hunk", `Next change (${formatTooltipKey("alt+down")})`)',
-		`iconButton("chev", "next-hunk", ${menuText("Next change ({key})", '{ key: formatTooltipKey("alt+down") }')})`),
 	patch('`Ignore whitespace (${formatTooltipKey("b")})`', menuText("Ignore whitespace ({key})", '{ key: formatTooltipKey("b") }')),
 	patch('`Ignoring whitespace; also ignore formatting (${formatTooltipKey("b")})`',
 		menuText("Ignoring whitespace; also ignore formatting ({key})", '{ key: formatTooltipKey("b") }')),
@@ -124,6 +120,21 @@ const GIT_TUI_PATCHES: readonly GitMenuPatch[] = [
 	patch('"Deleted"', menuText("Deleted")),
 ];
 
+
+const GIT_TUI_VARIANTS: readonly (readonly GitMenuPatch[])[] = [
+	[
+		patch('iconButton("chev-up", "prev-hunk", `Previous change (${formatTooltipKey("alt+up")})`)',
+			`iconButton("chev-up", "prev-hunk", ${menuText("Previous change ({key})", '{ key: formatTooltipKey("alt+up") }')})`),
+		patch('iconButton("chev", "next-hunk", `Next change (${formatTooltipKey("alt+down")})`)',
+			`iconButton("chev", "next-hunk", ${menuText("Next change ({key})", '{ key: formatTooltipKey("alt+down") }')})`),
+	],
+	[
+		patch('tool("chev-up", "prev-hunk", `Previous change (${formatTooltipKey("alt+up")})`)',
+			`tool("chev-up", "prev-hunk", ${menuText("Previous change ({key})", '{ key: formatTooltipKey("alt+up") }')})`),
+		patch('tool("chev", "next-hunk", `Next change (${formatTooltipKey("alt+down")})`)',
+			`tool("chev", "next-hunk", ${menuText("Next change ({key})", '{ key: formatTooltipKey("alt+down") }')})`),
+	],
+];
 const GIT_SIDEBAR_PATCHES: readonly GitMenuPatch[] = [
 	patch('label: "Path"', `label: ${menuText("Path")}`),
 	patch('label: "Tree"', `label: ${menuText("Tree")}`),
@@ -134,7 +145,6 @@ const GIT_SIDEBAR_PATCHES: readonly GitMenuPatch[] = [
 		`this.#model.branch !== null &&\n\t\t\t\t\t\t\ttext([span(${menuText("on {branch}", "{ branch: this.#model.branch }")}, "mono")], { role: "omp.app.git.branch", truncate: "middle" }),`),
 	patch('quietButton("Stage all", "stage-all", "Stage every change (space on the head)")',
 		`quietButton(${menuText("Stage all")}, "stage-all", ${menuText("Stage every change (space on the head)")})`),
-	patch('title: "Stage by description…"', `title: ${menuText("Stage by description…")}`),
 	patch('aria: "Stage by description"', `aria: ${menuText("Stage by description")}`),
 	patch('quietButton("Unstage all", "unstage-all", "Unstage every change (space on the head)")',
 		`quietButton(${menuText("Unstage all")}, "unstage-all", ${menuText("Unstage every change (space on the head)")})`),
@@ -195,6 +205,15 @@ const GIT_SIDEBAR_PATCHES: readonly GitMenuPatch[] = [
 		'" " + ' + menuText("Working tree clean — showing committed {sha}", "{ sha: head.shortSha }")),
 ];
 
+const GIT_SIDEBAR_VARIANTS: readonly (readonly GitMenuPatch[])[] = [
+	[
+		patch('title: "Stage by description…"', `title: ${menuText("Stage by description…")}`),
+	],
+	[
+		patch('iconButton("wand", "stage-ai", "Stage by description…", {', `iconButton("wand", "stage-ai", ${menuText("Stage by description…")}, {`),
+	],
+];
+
 const GIT_DIFF_PATCHES: readonly GitMenuPatch[] = [
 	patch('kind = "Text";', `kind = ${menuText("Text")};`),
 	patch('kind = "Binary";', `kind = ${menuText("Binary")};`),
@@ -219,8 +238,8 @@ const GIT_DIFF_PATCHES: readonly GitMenuPatch[] = [
 ];
 
 export const GIT_MENU_MODULES: readonly MenuModule[] = [
-	{ root: "tui", path: "src/apps/git/git-tui.ts", patches: GIT_TUI_PATCHES },
-	{ root: "tui", path: "src/apps/git/sidebar.ts", patches: GIT_SIDEBAR_PATCHES },
+	{ root: "tui", path: "src/apps/git/git-tui.ts", patches: GIT_TUI_PATCHES, variants: GIT_TUI_VARIANTS },
+	{ root: "tui", path: "src/apps/git/sidebar.ts", patches: GIT_SIDEBAR_PATCHES, variants: GIT_SIDEBAR_VARIANTS },
 	{ root: "tui", path: "src/apps/git/diff-pane.ts", patches: GIT_DIFF_PATCHES },
 ];
 

@@ -6,6 +6,7 @@ export const MODEL_HUB_TEXT_KEYS = [
 	"Chat",
 	"Kinds",
 	"All models",
+	"Matches",
 	"Recent",
 	"Model",
 	"All available models",

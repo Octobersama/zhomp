@@ -266,12 +266,20 @@ export const MENU_MODULES: readonly MenuModule[] = [
 			{ before: 'span("On this machine  ", "dim")', after: 'span(__zhompMenuText("On this machine  "), "dim")', count: 1 },
 			{ before: 'title: "Copy code"', after: 'title: __zhompMenuText("Copy code")', count: 1 },
 			{ before: 'title: "Copy the sign-in link"', after: 'title: __zhompMenuText("Copy the sign-in link")', count: 1 },
-			{ before: '[text("Copy")]', after: '[text(__zhompMenuText("Copy"))]', count: 1 },
 			{ before: 'title: `Open ${urlPlace(url)} in your browser`,', after: 'title: __zhompMenuText("Open {url} in your browser", { url: urlPlace(url) }),', count: 1 },
-			{ before: '[text("Open sign-in page"),', after: '[text(__zhompMenuText("Open sign-in page")),', count: 1 },
 			{ before: 'if (auth.device) return "Enter this code on the sign-in page to connect your account.";', after: 'if (auth.device) return __zhompMenuText("Enter this code on the sign-in page to connect your account.");', count: 1 },
 			{ before: 'return "Continue in your browser. If it didn\'t open, open or copy the link below.";', after: 'return __zhompMenuText("Continue in your browser. If it didn\'t open, open or copy the link below.");', count: 1 },
-		]
+		],
+		variants: [
+			[
+				{ before: '[text("Copy")]', after: '[text(__zhompMenuText("Copy"))]', count: 1 },
+				{ before: '[text("Open sign-in page"),', after: '[text(__zhompMenuText("Open sign-in page")),', count: 1 },
+			],
+			[
+				{ before: 'actionButton("Copy", "copy",', after: 'actionButton(__zhompMenuText("Copy"), "copy",', count: 1 },
+				{ before: 'actionButton("Open sign-in page", "open",', after: 'actionButton(__zhompMenuText("Open sign-in page"), "open",', count: 1 },
+			],
+		],
 	},
 	{
 		root: "tui",
@@ -350,8 +358,8 @@ export const MENU_MODULES: readonly MenuModule[] = [
 			{ before: 'placeholder: "Search extensions…",', after: 'placeholder: __zhompMenuText("Search extensions…"),', count: 1 },
 			{ before: 'empty: "No extensions found for this provider.",', after: 'empty: __zhompMenuText("No extensions found for this provider."),', count: 1 },
 			{ before: 'query ? `${shown} of ${total}` : `${total} extensions`', after: 'query ? __zhompMenuText("{shown} of {total}", { shown, total }) : __zhompMenuText("{count} extensions", { count: total })', count: 1 },
-			{ before: 'title: `Close  ${formatTooltipKey(boundKeys("app.interrupt", ["escape"])[0] ?? "escape")}`', after: 'title: __zhompMenuText("Close  {key}", { key: formatTooltipKey(boundKeys("app.interrupt", ["escape"])[0] ?? "escape") })', count: 1 },
-			{ before: 'aria: "Close",', after: 'aria: __zhompMenuText("Close"),', count: 1 },
+			{ before: '`Close  ${formatTooltipKey(boundKeys("app.interrupt", ["escape"])[0] ?? "escape")}`', after: '__zhompMenuText("Close  {key}", { key: formatTooltipKey(boundKeys("app.interrupt", ["escape"])[0] ?? "escape") })', count: 1 },
+			{ before: 'aria: "Close"', after: 'aria: __zhompMenuText("Close")', count: 1 },
 			{ before: 'span("Search: ", "muted")', after: 'span(__zhompMenuText("Search: "), "muted")', count: 1 },
 			{ before: 'span("type to filter", "dim")', after: 'span(__zhompMenuText("type to filter"), "dim")', count: 1 },
 			{ before: 'actionButton(selected?.on === false ? "Enable" : selected ? "Disable" : "Toggle", "toggle",', after: 'actionButton(selected?.on === false ? __zhompMenuText("Enable") : selected ? __zhompMenuText("Disable") : __zhompMenuText("Toggle"), "toggle",', count: 1 },

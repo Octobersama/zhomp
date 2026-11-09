@@ -641,6 +641,11 @@ const DESCRIBED_ONLY_PATCHES: readonly ExactPatch[] = [
 		count: 1,
 	},
 	{
+		before: `noun: rolesView ? "roles" : "models",`,
+		after: `noun: rolesView ? __zhompModelHubText("roles") : __zhompModelHubText("models"),`,
+		count: 1,
+	},
+	{
 		before: `label: \"Recent\",`,
 		after: `label: __zhompModelHubText(\"Recent\"),`,
 		count: 1,
@@ -893,6 +898,11 @@ const DESCRIBED_ONLY_PATCHES: readonly ExactPatch[] = [
 	{
 		before: 'placeholder: "Search models…",',
 		after: 'placeholder: __zhompModelHubText("Search models…"),',
+		count: 1,
+	},
+	{
+		before: `rest: entry.kind === "provider" ? entry.label : query ? "Matches" : "All models",`,
+		after: `rest: entry.kind === "provider" ? entry.label : query ? __zhompModelHubText("Matches") : __zhompModelHubText("All models"),`,
 		count: 1,
 	},
 	{
