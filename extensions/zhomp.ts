@@ -110,6 +110,14 @@ const SETTING_DESCRIPTION_TEMPLATES: readonly SettingDescriptionTemplate[] = [
 		captures: ["tab", "right"],
 	},
 	{
+		key: "Ask for up to four distinct predictions instead of one, most likely first. The ghost text shows the first one your draft matches; after inserting one, press {tab} again to pick another. The same single request returns a few more output tokens",
+		parts: [
+			"Ask for up to four distinct predictions instead of one, most likely first. The ghost text shows the first one your draft matches; after inserting one, press ",
+			" again to pick another. The same single request returns a few more output tokens",
+		],
+		captures: ["tab"],
+	},
+	{
 		key: "When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
 		parts: [
 			"When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable (",

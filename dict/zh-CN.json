@@ -4064,6 +4064,7 @@
 	"When you ask /btw for a steering prompt, it drafts one in <inject> tags, highlighted in the answer; Alt+I (app.btw.inject) sends it to the main session": "通过 /btw 请求引导提示时，会在回答中以 <inject> 标签生成并高亮草稿；按 Alt+I（app.btw.inject）可将其发送到主会话。",
 	"Prediction Alternatives": "预测备选项",
 	"Ask for up to four distinct predictions instead of one, most likely first. The ghost text shows the first one your draft matches; after inserting one, press Tab again to pick another. The same single request returns a few more output tokens": "一次请求最多生成四个不同的预测，并按可能性从高到低排列。草稿匹配的首个预测会显示为幽灵文本；插入后再次按 Tab 可选择其他预测。同一次请求会多返回少量输出 token。",
+	"Ask for up to four distinct predictions instead of one, most likely first. The ghost text shows the first one your draft matches; after inserting one, press {tab} again to pick another. The same single request returns a few more output tokens": "一次请求最多生成四个不同的预测，并按可能性从高到低排列。草稿匹配的首个预测会显示为幽灵文本；插入后再次按 {tab} 可选择其他预测。同一次请求会多返回少量输出 token。",
 	"Auto Update": "自动更新",
 	"Install omp updates in the background on startup; the next launch runs the new version": "启动时在后台安装 omp 更新；下次启动时运行新版本。",
 	"Enable hidden notices for standalone ultrathink, chillax, orchestrate, workflowz, jevify keywords": "为独立出现的 ultrathink、chillax、orchestrate、workflowz 和 jevify 关键词启用隐藏提示。",

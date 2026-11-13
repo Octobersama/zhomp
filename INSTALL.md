@@ -356,6 +356,17 @@ Windows／Bun 1.4.4／OMP 18.20.0：新增 23 条设置文案及“指令文件�
 
 部署和探针未结束或重启任何已有 OMP 进程，也没有写入用户设置。已有进程继续使用已加载代码，新开的 zhomp 加载本次产物。
 
+### GitHub Actions 故障排查（18.20.0）
+
+[Verify 43400802628](https://github.com/Octobersama/zhomp/actions/runs/43400802628) 的 Windows／Linux／macOS 最新宿主任务均安装 OMP 18.20.0，类型检查、50 个行为测试及 V01–V09 通过；V10／V11 在独立设置验收探针识别 `tui.mouse` 动态说明时失败。三个 OS 的最低支持版 18.3.2 任务全部通过。
+
+此前 [43003801929](https://github.com/Octobersama/zhomp/actions/runs/43003801929) 与 [42541043670](https://github.com/Octobersama/zhomp/actions/runs/42541043670) 的 GitHub 注解为账户计费问题导致 runner 未启动，未执行仓库代码；上述最新运行已能正常启动任务。这与新版设置探针的不兼容是不同原因。
+
+修复保留独立预期与旧宿主形状，补齐鼠标说明的两个精确模板；进一步的实际消费检查暴露 Prediction Alternatives 说明仅有固定 `Tab` 字典项、缺少动态主题按键模板，现已沿用原有精确转换补齐，旧词条保留。
+
+Windows／Bun 1.4.4／OMP 18.20.0 的定向复验通过：从当前源码安装到隔离临时根，实际 SettingsHost／SettingsSelector 在 ASCII、Unicode、Nerd 三种主题下逐条检查说明与原始按键字形，输出 458 条目、中文“深色主题”和保持原命令值的中文补全。临时安装已清理，本轮不更新生产环境，也未结束或重启已有 OMP 进程。
+
+
 ## 已知限制
 
 - 覆盖 `/settings`、`/model` 及上述菜单、向导和欢迎提示中的已知固定文案；主消息区、状态栏、详细诊断、共享 ModelBrowser 内部空状态仍可能为英文。发布说明正文、外部统计 Web 页面、工具／扩展提供的提问、选项、授权说明及动态记录不自动翻译。
