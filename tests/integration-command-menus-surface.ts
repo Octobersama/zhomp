@@ -57,7 +57,9 @@ interface SelectorPlan {
 	kind: "cancel" | "select";
 	index?: number;
 	last?: boolean;
+	selectLabel?: string;
 	search?: string;
+
 }
 
 interface SelectorEvidence {
@@ -78,7 +80,7 @@ interface CommandUi {
 	select(title: string, options: SelectorOptionInput[]): Promise<string | undefined>;
 	input(title: string, placeholder?: string, options?: unknown): Promise<string | undefined>;
 	editor(title: string, initialText?: string, placeholder?: string, options?: unknown): Promise<string | undefined>;
-	notify?(message: string, level: string): void;
+	notify(message: string, level: string): void;
 }
 
 interface CommandContext {
@@ -99,11 +101,18 @@ interface CommandHarness {
 	selectors: SelectorEvidence[];
 	editors: EditorEvidence[];
 	inputs: string[];
+	notifications: { message: string; level: string }[];
+
 }
 
 interface ReviewChoice {
 	label: string;
 	kind: string;
+}
+
+interface ReviewSelection {
+	choice: ReviewChoice;
+	cwd: string;
 }
 
 interface ReviewCommandApi {
@@ -114,8 +123,8 @@ interface ReviewCommandApi {
 		context: CommandContext,
 		cwd: string,
 		options: { includeCustom: boolean },
-	): Promise<ReviewChoice | undefined>;
-	selectReviewChoice(context: CommandContext, options: { includeCustom: boolean }): Promise<ReviewChoice | undefined>;
+	): Promise<ReviewChoice | ReviewSelection | undefined>;
+	selectReviewChoice(context: CommandContext, options: { includeCustom: boolean }): Promise<ReviewChoice | ReviewSelection | undefined>;
 }
 interface ReviewTargetApi {
 	LOCAL_REVIEW_CHOICES: readonly ReviewChoice[];
@@ -157,10 +166,16 @@ function createHarness(
 	const selectors: SelectorEvidence[] = [];
 	const editors: EditorEvidence[] = [];
 	const inputs: string[] = [];
+	const notifications: { message: string; level: string }[] = [];
 	const ui: CommandUi = {
 		async select(title, options) {
 			const plan = pendingPlans.shift();
 			assert(plan !== undefined, `Unexpected selector opened: ${title}`);
+			let initialIndex = plan.last ? options.length - 1 : plan.index ?? 0;
+			if (plan.selectLabel !== undefined) {
+				initialIndex = options.findIndex(option => (typeof option === "string" ? option : option.label) === plan.selectLabel);
+			}
+			assert(initialIndex >= 0, `Selector ${JSON.stringify(title)} did not contain planned option ${JSON.stringify(plan.selectLabel)}`);
 			let settled = false;
 			let selected: string | undefined;
 			let cancelled = false;
@@ -175,7 +190,7 @@ function createHarness(
 					cancelled = true;
 					settled = true;
 				},
-				{ initialIndex: plan.last ? options.length - 1 : plan.index ?? 0, maxVisible: plan.search === undefined ? 40 : 3 },
+				{ initialIndex, maxVisible: plan.search === undefined ? 40 : 3 },
 			);
 			const initialRendered = component.render(renderWidth).join("\n");
 			if (plan.search !== undefined) {
@@ -208,6 +223,9 @@ function createHarness(
 			editors.push({ title, initialText });
 			return undefined;
 		},
+		notify(message, level) {
+			notifications.push({ message, level });
+		},
 	};
 	return {
 		context: {
@@ -219,6 +237,7 @@ function createHarness(
 		selectors,
 		editors,
 		inputs,
+		notifications,
 	};
 }
 
@@ -371,17 +390,23 @@ const dynamicBranch = [{
 	type: "message",
 	message: { role: "user", content: "Please review https://github.com/example/repo/pull/42" },
 }];
+const reviewRepoRoot = join(probeRoot, "review-repo");
+mkdirSync(reviewRepoRoot, { recursive: true });
+const gitInit = Bun.spawnSync(["git", "init", "--quiet"], { cwd: reviewRepoRoot });
+assert(gitInit.exitCode === 0, "Could not initialize the isolated review repository fixture");
 const reviewSelection = createHarness(
 	[{ kind: "select", index: 0, search: "uncommitted changes" }],
 	dynamicBranch,
 	hookSelectorApi.HookSelectorComponent,
-	probeRoot,
+	reviewRepoRoot,
 	renderWidth,
 );
-const selectedReviewChoice = modernReviewSelector
-	? await reviewApi.selectReviewChoice(reviewSelection.context, probeRoot, { includeCustom: true })
+const selectedReview = modernReviewSelector
+	? await reviewApi.selectReviewChoice(reviewSelection.context, reviewRepoRoot, { includeCustom: true })
 	: await reviewApi.selectReviewChoice(reviewSelection.context, { includeCustom: true });
-assert(selectedReviewChoice, "Selecting a /review target did not return a choice");
+assert(selectedReview, "Selecting a /review target did not return a choice");
+const selectedReviewChoice = "choice" in selectedReview ? selectedReview.choice : selectedReview;
+if ("choice" in selectedReview) strictEqual(selectedReview.cwd, reviewRepoRoot, "the review selection must preserve its isolated checkout");
 strictEqual(selectedReviewChoice.kind, "uncommitted", "translated /review option did not map back to its canonical kind");
 strictEqual(selectedReviewChoice.label, "2. Review uncommitted changes", "translated /review option changed its canonical label");
 const reviewSelectionMenu = reviewSelection.selectors[0];
@@ -392,13 +417,15 @@ assert(dynamicPrOption, "The dynamic PR conversation row changed");
 strictEqual(dynamicPrOption.displayLabel, undefined, "dynamic PR conversation data must not be translated");
 strictEqual(reviewSelectionMenu.selected, "2. Review uncommitted changes", "the /review selector did not return its canonical search value");
 
-const reviewCustom = createHarness([{ kind: "select", last: true }], [], hookSelectorApi.HookSelectorComponent, probeRoot, renderWidth);
+const customReviewChoiceLabel = modernReviewSelector ? "5. Custom review instructions" : "4. Custom review instructions";
+const reviewCustom = createHarness([{ kind: "select", selectLabel: customReviewChoiceLabel }], [], hookSelectorApi.HookSelectorComponent, probeRoot, renderWidth);
 const reviewCustomResult = await new reviewApi.ReviewCommand({ cwd: probeRoot }).execute([], reviewCustom.context);
 strictEqual(reviewCustomResult, undefined, "cancelling the custom instruction editor must stop /review");
 const customEditor = reviewCustom.editors[0];
 assert(customEditor, "The installed /review command did not open the custom instruction editor");
 strictEqual(customEditor.title, expectedFixed("Enter custom review instructions", reviewSupported), "custom review editor title changed unexpectedly");
 strictEqual(customEditor.initialText, "Review the following:\n\n", "custom review editor starter text must remain unchanged");
+strictEqual(reviewCustom.notifications.length, 0, "custom review selection must not report a missing-checkout error");
 
 const annotateCancel = createHarness([{ kind: "cancel" }], [], hookSelectorApi.HookSelectorComponent, probeRoot, renderWidth);
 const annotateCancelResult = await new annotateApi.AnnotateCommand({ cwd: probeRoot }).execute([], annotateCancel.context);

@@ -327,8 +327,10 @@ theme.initThemeSync("unicode");
 
 const tuiModulePath = (relativePath: string): string => join(launch.host.tuiDir, "src", ...relativePath.split("/"));
 const agentModulePath = (relativePath: string): string => join(launch.host.packageDir, "src", ...relativePath.split("/"));
+const mcpControllerPath = agentModulePath("modes/controllers/mcp-command-controller.ts");
+const mcpControllerSource = readFileSync(mcpControllerPath, "utf8");
 const mcpControllerModule = (await import(
-	pathToFileURL(agentModulePath("modes/controllers/mcp-command-controller.ts")).href
+	pathToFileURL(mcpControllerPath).href
 )) as MCPControllerApi;
 // Load the installed wizard from LaunchConfig; a static import would test the checkout instead.
 const mcpWizardModule = (await import(pathToFileURL(tuiModulePath("overlays/mcp-add-wizard.ts")).href)) as MCPAddWizardApi;
@@ -457,6 +459,11 @@ const body = plainText(captured.body.render(240).join("\n"));
 	return { title: plainText(String(panel.nativeOverlay.head ?? captured.title)), body: `${ansi}\n${body}`, panel };
 })();
 
+const smitheryHelpDescriptions = [
+	{ source: "Search Smithery registry and deploy from picker" },
+	{ source: "Login to Smithery and cache API key" },
+	{ source: "Remove cached Smithery API key" },
+];
 const helpDescriptions: readonly { source: string }[] = [
 	{ source: "Add a new MCP server (interactive wizard)" },
 	{ source: "List all configured MCP servers" },
@@ -466,9 +473,7 @@ const helpDescriptions: readonly { source: string }[] = [
 	{ source: "Remove OAuth auth from an MCP server" },
 	{ source: "Enable an MCP server" },
 	{ source: "Disable an MCP server" },
-	{ source: "Search Smithery registry and deploy from picker" },
-	{ source: "Login to Smithery and cache API key" },
-	{ source: "Remove cached Smithery API key" },
+	...smitheryHelpDescriptions.filter(item => mcpControllerSource.includes(item.source)),
 	{ source: "Reconnect to a specific MCP server" },
 	{ source: "Force reload and rediscover MCP runtime tools" },
 	{ source: "List available resources from connected servers" },
@@ -491,10 +496,12 @@ const mcpSyntax = [
 	"/mcp unauth <name>    Remove OAuth auth from an MCP server",
 	"/mcp enable <name>    Enable an MCP server",
 	"/mcp disable <name>   Disable an MCP server",
-	"/mcp smithery-search <keyword> [--scope project|user] [--limit <1-100>] [--semantic]",
-	"/mcp smithery-search",
-	"/mcp smithery-login   Login to Smithery and cache API key",
-	"/mcp smithery-logout  Remove cached Smithery API key",
+	...(mcpControllerSource.includes("Search Smithery registry and deploy from picker") ? [
+		"/mcp smithery-search <keyword> [--scope project|user] [--limit <1-100>] [--semantic]",
+		"/mcp smithery-search",
+	] : []),
+	...(mcpControllerSource.includes("Login to Smithery and cache API key") ? ["/mcp smithery-login   Login to Smithery and cache API key"] : []),
+	...(mcpControllerSource.includes("Remove cached Smithery API key") ? ["/mcp smithery-logout  Remove cached Smithery API key"] : []),
 	"/mcp reconnect <name> Reconnect to a specific MCP server",
 	"/mcp reload           Force reload and rediscover MCP runtime tools",
 	"/mcp resources        List available resources from connected servers",

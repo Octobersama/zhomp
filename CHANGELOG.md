@@ -2,7 +2,8 @@
 
 ## 未发布
 
-- 修正 OMP 18.20.0 设置消费验收中已过期的鼠标动态说明模板；补齐 Prediction Alternatives 说明的精确按键模板，使 ASCII／Unicode／Nerd 主题均能翻译并保留实际 Tab 按键字形。保留旧词条、旧宿主形状及未知 getter 的严格失败检查，不删减三 OS、最低／latest 宿主或 V10／V11 门禁。
+- 适配 OMP 18.20.0 的 Prediction Alternatives 动态说明：按所选主题精确保留 Tab 显示字形并转换固定文案，保留原 `Tab` 词条。设置验收同步识别新版 `tui.mouse` 的 {shift} 说明，继续严格拒绝未知 getter 文案。
+- 更新 OMP 18.20.0 真实组件验收夹具：`/review` 使用隔离 Git 仓库，保留新 `ReviewSelection { choice, cwd }` 值；Context Viewer 按所选宿主的 overview API 断言分类标题；确认 UI 提供 `closeLinkBrowser`；MCP Smithery 帮助与语法仅在宿主源码实际提供时检查。保留完整消费断言与三 OS／最低和 latest 宿主／V10／V11 门禁。
 - 适配 OMP 18.20.0：补齐工具循环豁免、edit 工具要求、Ask 超时与审批区别、Find 验证模型、WebKit 浏览器、自动并行及顺序步骤等 23 条设置文案；新增“指令文件”分类，共 24 条字典项。配置键、模型／角色、设备名、URL、路径、数字和单位不变。
 - 恢复移除 Smithery 帮助后的 MCP 控制器、带 permission 状态的通用确认、HTML 表单问题标题和动态删除快捷键会话选择器的精确翻译；保留完整旧源码组与当前组。`/context` 分开展示系统提示词、指令文件及 Skills 的固定分类，保留旧宿主“排除 Skills”限定语、原始正文和统计语义。
 - 适配 OMP 18.18.8：补齐 LSP 启用范围、主代理委派策略，以及 Codex／Claude 按窗口自动兑换已保存重置次数的 15 条设置文案；保留原始 `unset`／`yes`／`no`、5h／每周窗口、无提示界面不兑换及 Fable 单独控制等条件，不修改配置或兑换行为。支持范围仍为 `>=18.3.2 <19`，宿主 Bun 要求仍为 `>=1.4.4`。

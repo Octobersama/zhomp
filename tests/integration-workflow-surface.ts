@@ -143,6 +143,7 @@ interface SeanceContext {
 }
 
 interface ConfirmationContext {
+	closeLinkBrowser(): void;
 	ui: UiStub & { terminal: { rows: number }; setFocus(value: unknown): void };
 	hookSelector?: MenuComponent;
 	editorContainer: {
@@ -896,6 +897,7 @@ try {
 				requestRender() {},
 				setFocus() {},
 			},
+			closeLinkBrowser() {},
 			editor: {},
 		editorContainer: { clear() {}, addChild() {} },
 		};

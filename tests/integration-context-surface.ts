@@ -39,6 +39,10 @@ interface ContextViewerApi {
 	) => ContextViewerInstance;
 }
 
+interface ContextOverviewApi {
+	overviewLabel(category: { id: string; label: string }): string;
+}
+
 interface NativeContext {
 	cols: number;
 	hour12: boolean;
@@ -211,6 +215,13 @@ try {
 		{ id: "tool-calls", label: "Tool Calls", tokens: 300, entries: [] },
 		{ id: "tool-output", label: "Tool Output", tokens: 400, entries: [] },
 	] as const;
+
+	// Resolve the source label from the selected host; a repository import could test a different pi-tui version.
+	const overviewModulePath = join(launch.host.tuiDir, "src", "overlays", "context-viewer-overview.ts");
+	const overviewModule = await import(pathToFileURL(overviewModulePath).href) as ContextOverviewApi;
+	const systemPromptCategory = categories.find(category => category.id === "system-prompt");
+	if (!systemPromptCategory) throw new Error("The context fixture has no system-prompt category");
+	const systemPromptOverviewLabel = overviewModule.overviewLabel(systemPromptCategory);
 	const breakdown = {
 		model: { id: "fixture-model-id", name: "Context" },
 		contextWindow: 10_000,
@@ -259,8 +270,10 @@ try {
 	const overviewNative = collectStrings(viewer.describe(nativeContext)).join("\n");
 	const overviewHead = collectStrings(viewer.nativeOverlay).join("");
 	ok(overviewHead.includes(`${expectedContext} · Context`), `native context/model title must translate only the fixed title; got ${JSON.stringify(overviewHead)}`);
+	const expectedSystemPromptOverview = mode === "ordinary" ? systemPromptOverviewLabel : localized(systemPromptOverviewLabel);
+	ok(overviewAnsi.includes(expectedSystemPromptOverview) || overviewNative.includes(expectedSystemPromptOverview), `overview system-prompt label mismatch in ${mode}: ${systemPromptOverviewLabel}`);
 	for (const key of [
-		"System Prompt (excluding Skills)", "Skills", "Built-in Tools", "Custom Tools", "User / Developer Messages",
+		"Skills", "Built-in Tools", "Custom Tools", "User / Developer Messages",
 		"Assistant Messages", "Assistant Thinking", "Tool Calls", "Tool Output", "Auto-Compact Buffer", "Free Space",
 	]) {
 		const expected: string = mode === "ordinary" ? key : localized(key);
