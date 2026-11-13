@@ -366,7 +366,7 @@ Windows／Bun 1.4.4／OMP 18.20.0：新增 23 条设置文案及“指令文件�
 
 Prediction Alternatives 同样使用与主题绑定的精确 `{tab}` 动态模板；旧的固定 `Tab` 字典项保留。鼠标动态说明已保留独立、完整的当前与旧版形状及未知形状失败检查。
 
-定向验证：Windows／Bun 1.4.4／OMP 18.20.0 上，类型检查通过，SettingsSelector（458 条目）、Context Viewer 三种语言模式、MCP／管理界面三种语言模式，以及 `/review` 实际组件消费通过；完整 V10 `--require-all` 与解包安装 V11 `--require-all` 均 PASS。当前候选修复分支的跨平台 Actions 重跑尚待完成；本记录不把本机验收写成远端矩阵通过。此次只使用隔离临时安装，不部署生产，也未结束或重启已有 OMP 进程。
+定向验证：Windows／Bun 1.4.4／OMP 18.20.0 上，类型检查通过，SettingsSelector（458 条目）、Context Viewer 三种语言模式、MCP／管理界面三种语言模式及 `/review` 实际组件消费通过；完整 V10 `--require-all` 与解包安装 V11 `--require-all` 均 PASS。随后最终提交 `322037a` 的 [Verify 43445529262](https://github.com/Octobersama/zhomp/actions/runs/43445529262) 在 Windows／Linux／macOS × OMP 18.3.2／18.20.0 六个矩阵任务全部成功。此次只使用隔离临时安装，不部署生产，也未结束或重启已有 OMP 进程。
 
 
 ## 已知限制
