@@ -59,20 +59,28 @@ const SELECTOR_PATCHES: readonly WorkflowMenuPatch[] = [
 	),
 ];
 
-const CONFIRMATION_PATCHES: readonly WorkflowMenuPatch[] = [
-	patch(
-		'const result = await this.showHookSelector(`${title}\\n${message}`, ["Yes", "No"], dialogOptions);',
-		'const canonicalChoices = ["Yes", "No"];\n\t\tconst translatedChoiceLabels = canonicalChoices.map(choice => __zhompMenuText(choice));\n\t\tconst displayChoiceLabels =\n\t\t\tnew Set(translatedChoiceLabels).size === translatedChoiceLabels.length ? translatedChoiceLabels : canonicalChoices;\n\t\tconst choiceOptions = canonicalChoices.map((label, index) => ({\n\t\t\tlabel,\n\t\t\tdisplayLabel: displayChoiceLabels[index]!,\n\t\t}));\n\t\tconst result = await this.showHookSelector(`${title}\\n${message}`, choiceOptions, dialogOptions);',
-		1,
-	),
+const CONFIRMATION_VARIANTS: readonly (readonly WorkflowMenuPatch[])[] = [
+	[
+		patch(
+			'const result = await this.showHookSelector(`${title}\\n${message}`, ["Yes", "No"], dialogOptions);',
+			'const canonicalChoices = ["Yes", "No"];\n\t\tconst translatedChoiceLabels = canonicalChoices.map(choice => __zhompMenuText(choice));\n\t\tconst displayChoiceLabels =\n\t\t\tnew Set(translatedChoiceLabels).size === translatedChoiceLabels.length ? translatedChoiceLabels : canonicalChoices;\n\t\tconst choiceOptions = canonicalChoices.map((label, index) => ({\n\t\t\tlabel,\n\t\t\tdisplayLabel: displayChoiceLabels[index]!,\n\t\t}));\n\t\tconst result = await this.showHookSelector(`${title}\\n${message}`, choiceOptions, dialogOptions);',
+			1,
+		),
+	],
+	[
+		patch(
+			'const result = await this.showHookSelector(`${title}\\n${message}`, ["Yes", "No"], dialogOptions, {\n\t\t\tkind: "permission",\n\t\t});',
+			'const canonicalChoices = ["Yes", "No"];\n\t\tconst translatedChoiceLabels = canonicalChoices.map(choice => __zhompMenuText(choice));\n\t\tconst displayChoiceLabels =\n\t\t\tnew Set(translatedChoiceLabels).size === translatedChoiceLabels.length ? translatedChoiceLabels : canonicalChoices;\n\t\tconst choiceOptions = canonicalChoices.map((label, index) => ({\n\t\t\tlabel,\n\t\t\tdisplayLabel: displayChoiceLabels[index]!,\n\t\t}));\n\t\tconst result = await this.showHookSelector(`${title}\\n${message}`, choiceOptions, dialogOptions, {\n\t\t\tkind: "permission",\n\t\t});',
+			1,
+		),
+	],
 ];
-
 
 export const WORKFLOW_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "agent", path: "src/slash-commands/seance.ts", patches: SEANCE_PATCHES },
 	{ root: "agent", path: "src/modes/controllers/cleanse-command-controller.ts", patches: CLEANSE_PATCHES },
 	{ root: "agent", path: "src/modes/controllers/input-controller.ts", patches: INPUT_PATCHES },
-	{ root: "agent", path: "src/modes/controllers/extension-ui-controller.ts", patches: CONFIRMATION_PATCHES },
+	{ root: "agent", path: "src/modes/controllers/extension-ui-controller.ts", patches: [], variants: CONFIRMATION_VARIANTS },
 	{ root: "agent", path: "src/modes/controllers/selector-controller.ts", patches: SELECTOR_PATCHES },
 ];
 

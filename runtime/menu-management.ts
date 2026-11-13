@@ -714,9 +714,6 @@ const mcpControllerPatches = patches([
 	['"  /mcp unauth <name>    Remove OAuth auth from an MCP server"', '`  /mcp unauth <name>    ${__zhompMenuText("Remove OAuth auth from an MCP server")}`', 1],
 	['"  /mcp enable <name>    Enable an MCP server"', '`  /mcp enable <name>    ${__zhompMenuText("Enable an MCP server")}`', 1],
 	['"  /mcp disable <name>   Disable an MCP server"', '`  /mcp disable <name>   ${__zhompMenuText("Disable an MCP server")}`', 1],
-	['"                        Search Smithery registry and deploy from picker"', '`                        ${__zhompMenuText("Search Smithery registry and deploy from picker")}`', 1],
-	['"  /mcp smithery-login   Login to Smithery and cache API key"', '`  /mcp smithery-login   ${__zhompMenuText("Login to Smithery and cache API key")}`', 1],
-	['"  /mcp smithery-logout  Remove cached Smithery API key"', '`  /mcp smithery-logout  ${__zhompMenuText("Remove cached Smithery API key")}`', 1],
 	['"  /mcp reconnect <name> Reconnect to a specific MCP server"', '`  /mcp reconnect <name> ${__zhompMenuText("Reconnect to a specific MCP server")}`', 1],
 	['"  /mcp reload           Force reload and rediscover MCP runtime tools"', '`  /mcp reload           ${__zhompMenuText("Force reload and rediscover MCP runtime tools")}`', 1],
 	['"  /mcp resources        List available resources from connected servers"', '`  /mcp resources        ${__zhompMenuText("List available resources from connected servers")}`', 1],
@@ -835,7 +832,23 @@ const commandControllerPatches = patches([
 ]);
 
 export const MANAGEMENT_MENU_MODULES: readonly MenuModule[] = [
-	{ root: "agent", path: "src/modes/controllers/mcp-command-controller.ts", patches: mcpControllerPatches },
+	{
+		root: "agent",
+		path: "src/modes/controllers/mcp-command-controller.ts",
+		patches: mcpControllerPatches,
+		variants: [
+			patches([
+				['"                        Search Smithery registry and deploy from picker"', '`                        ${__zhompMenuText("Search Smithery registry and deploy from picker")}`', 1],
+				['"  /mcp smithery-login   Login to Smithery and cache API key"', '`  /mcp smithery-login   ${__zhompMenuText("Login to Smithery and cache API key")}`', 1],
+				['"  /mcp smithery-logout  Remove cached Smithery API key"', '`  /mcp smithery-logout  ${__zhompMenuText("Remove cached Smithery API key")}`', 1],
+			]),
+			patches([
+				['"                        Search Smithery registry and deploy from picker"', '"                        Search Smithery registry and deploy from picker"', 0],
+				['"  /mcp smithery-login   Login to Smithery and cache API key"', '"  /mcp smithery-login   Login to Smithery and cache API key"', 0],
+				['"  /mcp smithery-logout  Remove cached Smithery API key"', '"  /mcp smithery-logout  Remove cached Smithery API key"', 0],
+			]),
+		],
+	},
 	{ root: "tui", path: "src/overlays/mcp-add-wizard.ts", patches: mcpWizardPatches },
 	{ root: "tui", path: "src/overlays/agent-hub.ts", patches: agentHubPatches },
 	{ root: "tui", path: "src/overlays/agent-hub-renderer.ts", patches: agentHubRendererPatches },

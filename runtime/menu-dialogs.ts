@@ -95,8 +95,6 @@ const FORM_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
 	patch('const SUBMIT_LABEL = "Submit";', 'const SUBMIT_LABEL = ' + text("Submit") + ';', 1),
 	patch('const OTHER_PLACEHOLDER = "type your own";', 'const OTHER_PLACEHOLDER = ' + text("type your own") + ';', 1),
 	patch('const REVIEW_TAB = "Review";', 'const REVIEW_TAB = ' + text("Review") + ';', 1),
-	patch('const label = title || sanitize(questions.get(fields[0]!) ?? "") || `Question ${tabs.length + 1}`;',
-		'const label = title || sanitize(questions.get(fields[0]!) ?? "") || ' + text("Question {count}", "{ count: tabs.length + 1 }") + ';', 1),
 	patch('return more > 0 ? `${question} (+${more} more)` : question;',
 		'return more > 0 ? ' + text("{question} (+{count} more)", "{ question, count: more }") + ' : question;', 1),
 	patch('if (slot.state === "failed") return `▣ ${name} — couldn\'t load: ${sanitize(slot.reason)}`;',
@@ -150,6 +148,16 @@ const FORM_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
 	patch('span("Question  ", "muted")', 'span(' + text("Question") + ' + "  ", "muted")', 1),
 	patch('actionButton("Show", "show", { tone: "accent", ...(hideKey ? { keys: hideKey } : {}) })',
 		'actionButton(' + text("Show") + ', "show", { tone: "accent", ...(hideKey ? { keys: hideKey } : {}) })', 1),
+];
+const FORM_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+	[
+		patch('const label = title || sanitize(questions.get(fields[0]!) ?? "") || `Question ${tabs.length + 1}`;',
+			'const label = title || sanitize(questions.get(fields[0]!) ?? "") || ' + text("Question {count}", "{ count: tabs.length + 1 }") + ';', 1),
+	],
+	[
+		patch('const label = title || sanitize(question) || `Question ${tabs.length + 1}`;',
+			'const label = title || sanitize(question) || ' + text("Question {count}", "{ count: tabs.length + 1 }") + ';', 1),
+	],
 ];
 
 const FORM_DATA_PATCHES: readonly DialogMenuPatch[] = [
@@ -229,7 +237,7 @@ const HOOK_SELECTOR_PATCHES: readonly DialogMenuPatch[] = [
 
 export const DIALOG_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/overlays/ask-dialog.ts", patches: ASK_DIALOG_PATCHES, variants: ASK_DIALOG_VARIANTS },
-	{ root: "tui", path: "src/html-form/dialog.ts", patches: FORM_DIALOG_PATCHES },
+	{ root: "tui", path: "src/html-form/dialog.ts", patches: FORM_DIALOG_PATCHES, variants: FORM_DIALOG_VARIANTS },
 	{ root: "tui", path: "src/html-form/data.ts", patches: FORM_DATA_PATCHES },
 	{ root: "tui", path: "src/overlays/approval-dialog.ts", patches: APPROVAL_DIALOG_PATCHES },
 	{ root: "tui", path: "src/overlays/hook-selector.ts", patches: HOOK_SELECTOR_PATCHES },

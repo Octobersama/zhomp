@@ -62,7 +62,8 @@ const CONTEXT_OVERVIEW_PATCHES: readonly MenuPatch[] = [
 	patch(
 		'export interface OverviewRow {',
 		`const CONTEXT_OVERVIEW_TEXT_KEYS = {
-	"system-prompt": "System Prompt (excluding Skills)",
+	"system-prompt": "System Prompt",
+	"instruction-files": "Instruction Files",
 	skills: "Skills",
 	"built-in-tools": "Built-in Tools",
 	"custom-tools": "Custom Tools",
@@ -79,11 +80,11 @@ export interface OverviewRow {`,
 	),
 	patch(
 		'const label = truncateToWidth(safeLine(row.label), budget);',
-		'const label = truncateToWidth(safeLine(row.child ? row.label : __zhompMenuText(CONTEXT_OVERVIEW_TEXT_KEYS[row.id])), budget);',
+		'const label = truncateToWidth(safeLine(row.child ? row.label : __zhompMenuText(row.id === "system-prompt" && row.label === "System Prompt (excluding Skills)" ? row.label : CONTEXT_OVERVIEW_TEXT_KEYS[row.id])), budget);',
 	),
 	patch(
 		'span(safeText(row.label), selected ? `${presentation.color} strong` : undefined),',
-		'span(safeText(row.child ? row.label : __zhompMenuText(CONTEXT_OVERVIEW_TEXT_KEYS[row.id])), selected ? `${presentation.color} strong` : undefined),',
+		'span(safeText(row.child ? row.label : __zhompMenuText(row.id === "system-prompt" && row.label === "System Prompt (excluding Skills)" ? row.label : CONTEXT_OVERVIEW_TEXT_KEYS[row.id])), selected ? `${presentation.color} strong` : undefined),',
 	),
 	patch(
 		'if (!snap.visionCapable) return ["Snapcompact: inactive (model has no image input)"];',
@@ -174,6 +175,7 @@ export const CONTEXT_MENU_TEXT_KEYS: readonly string[] = [
 	"no model",
 	"System Prompt",
 	"System Prompt (excluding Skills)",
+	"Instruction Files",
 	"Skills",
 	"Built-in Tools",
 	"Custom Tools",
