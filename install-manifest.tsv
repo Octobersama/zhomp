@@ -8,6 +8,7 @@ copy	runtime/menu-catalog.ts	.omp/zh/menu-catalog.ts	all
 copy	runtime/menu-text.ts	.omp/zh/menu-text.ts	all
 copy	runtime/menu-git.ts	.omp/zh/menu-git.ts	all
 copy	runtime/menu-dashboards.ts	.omp/zh/menu-dashboards.ts	all
+copy	runtime/menu-process.ts	.omp/zh/menu-process.ts	all
 copy	runtime/menu-dialogs.ts	.omp/zh/menu-dialogs.ts	all
 copy	runtime/menu-management.ts	.omp/zh/menu-management.ts	all
 copy	runtime/menu-agent-views.ts	.omp/zh/menu-agent-views.ts	all

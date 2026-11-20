@@ -18,11 +18,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - name: Derive minimum and latest host versions
+      - name: Derive minimum, latest minimum-major, and latest supported host versions
         id: hosts
         shell: bash
         run: |
-          hosts=$(bun -e 'import { readSupportPolicy } from "./runtime/host.ts"; console.log(JSON.stringify([readSupportPolicy(process.cwd()).minimumVersion, "latest"]))')
+          hosts=$(bun -e '
+          import { readSupportPolicy } from "./runtime/host.ts";
+          const policy = readSupportPolicy(process.cwd());
+          const minimumMajor = Number(policy.minimumVersion.split(".")[0]);
+          const minimumMajorRange = `>=${policy.minimumVersion} <${minimumMajor + 1}`;
+          console.log(JSON.stringify([...new Set([policy.minimumVersion, minimumMajorRange, policy.range])]));
+          ')
           printf 'hosts=%s\n' "$hosts" >> "$GITHUB_OUTPUT"
   verify:
     needs: prepare

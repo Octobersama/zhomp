@@ -79,6 +79,7 @@ interface AskResultItem {
 	selectedOptions: string[];
 	customInput?: string;
 	note?: string;
+	noteOption?: string;
 }
 
 interface AskSubmitResult {
@@ -94,6 +95,7 @@ interface AskCallbacks {
 
 interface AskInstance {
 	render(width: number): readonly string[];
+	keyHints?(): string;
 	describe?(context: NativeContext): unknown;
 	handleNativeEvent?(event: NativeEvent): void;
 	handleInput(data: string): void;
@@ -102,6 +104,25 @@ interface AskInstance {
 
 interface AskDialogApi {
 	AskDialogComponent: new (questions: readonly AskQuestion[], callbacks: AskCallbacks, options?: Record<string, unknown>) => AskInstance;
+}
+interface HtmlFormInstance extends AskInstance {
+	handleNativeEvent?(event: NativeEvent): void;
+	data?(): Record<string, unknown>;
+	givenAnswers?(): { data: Record<string, unknown>; notes: readonly unknown[] } | undefined;
+}
+
+interface HtmlFormDialogApi {
+	HtmlFormDialog: new (
+		form: unknown,
+		callbacks: {
+			onSubmit(data: Record<string, unknown>, notes: readonly unknown[]): void;
+			onCancel(): void;
+		},
+	) => HtmlFormInstance;
+}
+
+interface HtmlFormParserApi {
+	parseHtmlForm(source: string): unknown;
 }
 
 interface ApprovalGrant {
@@ -241,6 +262,8 @@ if (!configPath || !probeRoot) throw new Error("Missing installed launch config 
 const installDir = dirname(configPath);
 const installedHost = await import(pathToFileURL(join(installDir, "host.ts")).href) as InstalledHostApi;
 const launch = installedHost.readLaunchConfig(configPath);
+const hostMajor = Number.parseInt(launch.host.version.split(".")[0] ?? "", 10);
+const currentScrollingAsk = hostMajor >= 19;
 const shippedDictionary = parseDictionaryText(readFileSync(launch.dictPath, "utf8"));
 if (!shippedDictionary) throw new Error("The installed dialog probe dictionary is invalid");
 let dictionary: Readonly<Record<string, string>> = shippedDictionary;
@@ -314,6 +337,19 @@ function expectKeyTooltip(actual: unknown, keyedKey: string, rendered: string): 
 	expectTemplatePrefix(actual, keyedKey, rendered);
 }
 
+function expectNativeAskTag(nodes: readonly SurfaceNode[], rendered: string): void {
+	const tag = nodes.find(node => nativeProps(node).role === "omp.ask.card.tag");
+	const expected = mode === "ordinary" ? "ask" : expectedText("Ask");
+	expect(collectStrings(tag?.p).includes(expected), `Expected native Ask card tag ${JSON.stringify(expected)}`, rendered);
+}
+
+function expectFoldedOther(native: unknown, expected: string, rendered: string): void {
+	// The native pill puts the full label in its tooltip when the visible text is clipped.
+	const pills = collectNodes(native).map(nativeProps).filter(props => props.role === "omp.ask.pill");
+	expect(pills.some(pill => (pill.title ?? pill.text) === expected),
+		`Expected full folded Other label ${JSON.stringify(expected)}`, rendered);
+}
+
 function nativeContext(picker: boolean): NativeContext {
 	return {
 		cols: 120,
@@ -374,22 +410,39 @@ const askNodes = collectNodes(askNative);
 expectFixed(askAnsi, "Ask", askAnsi);
 expectFixed(askAnsi, "Other…", askAnsi);
 expectFixed(askAnsi, " (Recommended)", askAnsi);
-expectFixed(askAnsi, "toggle", askAnsi);
-expectFixed(askAnsi, "next", askAnsi);
-	expectFixed(askAnsi, "move", askAnsi);
-	expectFixed(askAnsi, "question", askAnsi);
-	expectFixed(askAnsi, "cancel", askAnsi);
+if (currentScrollingAsk) {
+	const askHints = ask.keyHints?.();
+	if (!askHints) throw new Error("Current Ask did not expose its composer keyboard hints");
+	for (const key of ["toggle", "next", "move", "question", "composer"]) expectFixed(askHints, key, askHints);
+} else {
+	for (const key of ["toggle", "next", "move", "question", "cancel"]) expectFixed(askAnsi, key, askAnsi);
+}
 	expect(askAnsi.includes("Submit") && askAnsi.includes("Settings") && askAnsi.includes("Other…") &&
 		askAnsi.includes("high") && askAnsi.includes("Other (type your own)") && askAnsi.includes(localizedOtherOptionValue),
 		"ANSI ask must preserve caller questions and option values", askAnsi);
+if (currentScrollingAsk && (!askNativeAvailable || !askNativeEventsAvailable)) {
+	throw new Error("Current Ask must expose its transformed native card and action events");
+}
 if (askNativeAvailable) {
 	const askNativeText = collectStrings(askNative).join("\n");
-	expectFixed(askNativeText, "Review", askNativeText);
+	if (currentScrollingAsk) {
+		const card = askNodes.find(node => nativeProps(node).role === "omp.ask.card");
+		expect(card !== undefined, "Current Ask did not render its scrolling ask card", askNativeText);
+		expect(!askNodes.some(node => nativeProps(node).role === "omp.ask.questions"),
+			"Current Ask regressed to question tabs", askNativeText);
+		expectNativeAskTag(askNodes, askNativeText);
+		expectFixed(askNativeText, "{answered} of {total} answered", askNativeText, { answered: 0, total: 2 });
+		expectFixed(askNativeText, "Answer this question", askNativeText);
+		expectFixed(askNativeText, "Cancel without answering", askNativeText);
+		expectFixed(askNativeText, "Submit the answers", askNativeText);
+	} else {
+		expectFixed(askNativeText, "Review", askNativeText);
+		expectFixed(askNativeText, "Next question  tab · Previous  shift+tab", askNativeText);
+		const nextButton = actionNode(askNodes, "submit");
+		if (!nextButton) throw new Error(`Ask native Next action missing; rendered=${JSON.stringify(askNativeText)}`);
+		expectFixed(collectStrings(nextButton).join(""), "Next", askNativeText);
+	}
 	expectFixed(askNativeText, "Recommended", askNativeText);
-	expectFixed(askNativeText, "Next question  tab · Previous  shift+tab", askNativeText);
-	const nextButton = actionNode(askNodes, "submit");
-	if (!nextButton) throw new Error(`Ask native Next action missing; rendered=${JSON.stringify(askNativeText)}`);
-	expectFixed(collectStrings(nextButton).join(""), "Next", askNativeText);
 	const rawSubmitChoice = itemNode(askNodes, "option:0");
 	const rawSettingsChoice = itemNode(askNodes, "option:2");
 	const callerQuestion = askNodes.find(node => nativeProps(node).role === "omp.ask.question");
@@ -425,13 +478,8 @@ if (askNativeAvailable) {
 		"Ask native collision disambiguation lost the caller's canonical sentinel-like option", askNativeText);
 	expectFixed(collectStrings(nativeProps(otherRow).label).join(""), "Other…", askNativeText);
 	expectFixed(collectStrings(nativeProps(otherRow).detail).join(""), "Type your own answer", askNativeText);
-	const hideButton = actionNode(askNodes, "hide");
-	const skipButton = actionNode(askNodes, "cancel");
 	const noteButton = actionNode(askNodes, "note");
-	expect(hideButton !== undefined && skipButton !== undefined && noteButton !== undefined,
-		"Ask native action IDs changed", askNativeText);
-	expectFixed(collectStrings(hideButton).join(""), "Hide", askNativeText);
-	expectFixed(collectStrings(skipButton).join(""), "Skip", askNativeText);
+	expect(noteButton !== undefined, "Ask native Note action ID changed", askNativeText);
 	expectFixed(collectStrings(noteButton).join(""), "Note", askNativeText);
 	const noteTitle = collectStrings(nativeProps(noteButton).title).join("");
 	const noteTitleKeys = [
@@ -440,11 +488,50 @@ if (askNativeAvailable) {
 	] as const;
 	expect(noteTitleKeys.some(key => noteTitle.includes(expectedText(key))),
 		"Ask Note action lost its answer-target hint or n key", askNativeText);
-	expectKeyTooltip(nativeProps(hideButton).title, "Hide until you are ready to answer  {key}", askNativeText);
-	expectKeyTooltip(nativeProps(skipButton).title, "Skip without answering  {key}", askNativeText);
+	if (currentScrollingAsk) {
+		const cancelButton = actionNode(askNodes, "cancel");
+		const submitButton = actionNode(askNodes, "submit");
+		expect(cancelButton !== undefined && submitButton !== undefined, "Current Ask native action IDs changed", askNativeText);
+		expectFixed(collectStrings(cancelButton).join(""), "Cancel", askNativeText);
+		expectFixed(collectStrings(submitButton).join(""), "Submit", askNativeText);
+	} else {
+		const hideButton = actionNode(askNodes, "hide");
+		const skipButton = actionNode(askNodes, "cancel");
+		expect(hideButton !== undefined && skipButton !== undefined, "Legacy Ask native action IDs changed", askNativeText);
+		expectFixed(collectStrings(hideButton).join(""), "Hide", askNativeText);
+		expectFixed(collectStrings(skipButton).join(""), "Skip", askNativeText);
+		expectKeyTooltip(nativeProps(hideButton).title, "Hide until you are ready to answer  {key}", askNativeText);
+		expectKeyTooltip(nativeProps(skipButton).title, "Skip without answering  {key}", askNativeText);
+	}
 }
 
-if (askNativeAvailable && askNativeEventsAvailable) {
+if (currentScrollingAsk) {
+	ask.handleNativeEvent?.({ type: "select", key: "q0", item: "option:4" });
+	ask.handleNativeEvent?.({ type: "select", key: "q0", item: "option:5" });
+	ask.handleNativeEvent?.({ type: "select", key: "q0", item: "other" });
+	await Promise.resolve();
+	await Promise.resolve();
+	const customAnsi = Bun.stripANSI(ask.render(renderWidth).join("\n"));
+	if (mode === "hostile") {
+		// The host caps folded chips independently of the ANSI render width.
+		expect(customAnsi.includes("恶意文案(Other: “Ot…"), "Current Ask lost the clipped hostile Other chip", customAnsi);
+	} else {
+		expectFixed(customAnsi, "Other: “{answer}”", customAnsi, { answer: "Other…" });
+	}
+	const customNative = ask.describe?.(nativeContext(false));
+	expectFoldedOther(customNative, expectedText("Other: “{answer}”", { answer: "Other…" }), collectStrings(customNative).join("\n"));
+	ask.handleNativeEvent?.({ type: "action", key: "q0", act: "open:0", mods: [] });
+	ask.handleNativeEvent?.({ type: "select", key: "q0", item: "option:3" });
+	ask.handleNativeEvent?.({ type: "action", key: "actions", act: "note", mods: [] });
+	await Promise.resolve();
+	await Promise.resolve();
+	ask.handleNativeEvent?.({ type: "action", key: "actions", act: "submit", mods: [] });
+	expect(!askResult, "Current Ask submitted before opening its first unanswered question", customAnsi);
+	const partialNative = ask.describe ? collectStrings(ask.describe(nativeContext(false))).join("\n") : customAnsi;
+	expectFixed(partialNative, "{answered} of {total} answered", partialNative, { answered: 1, total: 2 });
+	expect(partialNative.includes("Settings"), "Current Ask did not open the first unanswered question", partialNative);
+	ask.handleNativeEvent?.({ type: "action", key: "actions", act: "submit", mods: [] });
+} else if (askNativeAvailable && askNativeEventsAvailable) {
 	ask.handleNativeEvent?.({ type: "select", key: "tabs", item: "submit" });
 	const unansweredAnsi = Bun.stripANSI(ask.render(renderWidth).join("\n"));
 	const unansweredNative = ask.describe ? ask.describe(nativeContext(false)) : askNative;
@@ -521,6 +608,7 @@ if (askNativeAvailable && askNativeEventsAvailable) {
 }
 expect(!askCancelled, "Ask probe unexpectedly cancelled", askAnsi);
 if (!askResult) throw new Error(`Ask callback did not receive a submit result; rendered=${JSON.stringify(askAnsi)}`);
+expectValue(askResult.kind, "submit", "Ask changed the submit callback kind", askAnsi);
 if (askPrompts.length !== 2) throw new Error(`Ask expected custom-answer and note prompts; captured=${askPrompts.length} rendered=${JSON.stringify(askAnsi)}`);
 const customPrompt = askPrompts[0];
 const notePrompt = askPrompts[1];
@@ -538,11 +626,90 @@ if (!firstAskResult || !secondAskResult) throw new Error(`Ask callback lost ques
 		"Ask changed canonical option values or sentinel collision inputs", askAnsi);
 	expectValue(firstAskResult.selectedOptions, ["high", "Other (type your own)", localizedOtherOptionValue], "Ask changed canonical selected option values", askAnsi);
 expectValue(firstAskResult.customInput, "Other…", "Ask changed the custom-answer value", askAnsi);
+if (currentScrollingAsk) expectValue(firstAskResult.noteOption, "high", "Ask changed the option attached to the note", askAnsi);
 expectValue(firstAskResult.note, "Other…", "Ask changed the note value", askAnsi);
 expectValue(secondAskResult.id, "high", "Ask changed the second question ID", askAnsi);
 expectValue(secondAskResult.question, "Settings", "Ask changed the second caller question", askAnsi);
 expectValue(secondAskResult.options, ["Other…", "Settings"], "Ask changed second-question option values", askAnsi);
-expectValue(secondAskResult.selectedOptions, ["Other…"], "Ask returned a translated second option value", askAnsi);
+	expectValue(secondAskResult.selectedOptions, currentScrollingAsk ? [] : ["Other…"], "Ask returned changed or translated partial answers", askAnsi);
+if (currentScrollingAsk) {
+	// Static workspace imports would bypass the launch-selected, source-transformed TUI package.
+	const formDialogPath = Bun.resolveSync("@oh-my-pi/pi-tui/html-form/dialog", launch.host.packageDir);
+	const formParserPath = Bun.resolveSync("@oh-my-pi/pi-tui/html-form/parse", launch.host.packageDir);
+	const formDialogApi = await import(pathToFileURL(formDialogPath).href) as HtmlFormDialogApi;
+	const formParser = await import(pathToFileURL(formParserPath).href) as HtmlFormParserApi;
+	const htmlForm = formParser.parseHtmlForm(`<form>
+		<input type="hidden" name="token" value="Settings">
+		<fieldset>
+			<legend>Settings</legend>
+			<p>Choose a feature</p>
+			<label><input type="checkbox" name="features" value="submit-value" checked required>Submit</label>
+			<label><input type="checkbox" name="features" value="settings-value">Settings</label>
+			<label><input type="checkbox" name="features" value="high-value">high</label>
+			<label><input type="checkbox" name="features" value="id-value">id</label>
+			<label><input type="checkbox" name="features" value="other-value">Keep Other…</label>
+		</fieldset>
+		<fieldset>
+			<legend>Response</legend>
+			<label for="response">Settings</label>
+			<input id="response" name="response" type="text">
+		</fieldset>
+	</form>`);
+	let formResult: Record<string, unknown> | undefined;
+	let formNotes: readonly unknown[] | undefined;
+	let formCancelled = false;
+	const form = new formDialogApi.HtmlFormDialog(htmlForm, {
+		onSubmit(data, notes) { formResult = data; formNotes = notes; },
+		onCancel() { formCancelled = true; },
+	});
+	const formAnsi = Bun.stripANSI(form.render(renderWidth).join("\n"));
+	const formNative = form.describe?.(nativeContext(false));
+	if (!formNative || !form.handleNativeEvent || !form.givenAnswers) {
+		throw new Error("Current HTML Ask form must expose its transformed native card and answer API");
+	}
+	const formNativeText = collectStrings(formNative).join("\n");
+	const formNodes = collectNodes(formNative);
+	expect(formNodes.some(node => nativeProps(node).role === "omp.ask.card"),
+		"Current HTML Ask form did not render the scrolling card", formNativeText);
+	const formCancelButton = actionNode(formNodes, "cancel");
+	const formSubmitButton = actionNode(formNodes, "submit");
+	expect(formCancelButton !== undefined && formSubmitButton !== undefined,
+		"Current HTML Ask form native actions changed", formNativeText);
+	expectFixed(collectStrings(formCancelButton).join(""), "Cancel", formNativeText);
+	expectFixed(collectStrings(formSubmitButton).join(""), "Submit", formNativeText);
+	expectFixed(formAnsi, "Ask", formAnsi);
+	expectFixed(formAnsi, "Other: ", formAnsi);
+	expectFixed(formAnsi, "type your own", formAnsi);
+	expectNativeAskTag(formNodes, formNativeText);
+	expectFixed(formNativeText, "{answered} of {total} answered", formNativeText, { answered: 1, total: 2 });
+	expectFixed(formNativeText, "Other…", formNativeText);
+	expectFixed(formNativeText, "type your answer", formNativeText);
+	expectFixed(formNativeText, "Answer this question", formNativeText);
+	expect(formNativeText.includes("Submit") && formNativeText.includes("Settings") && formNativeText.includes("high") &&
+		formNativeText.includes("id") && formNativeText.includes("Keep Other…"),
+		"Current HTML Ask form translated caller labels or field content", formNativeText);
+	form.handleNativeEvent({ type: "select", key: "f0", item: "other" });
+	for (const character of "custom reply") form.handleInput(character);
+	const customFormAnsi = Bun.stripANSI(form.render(renderWidth).join("\n"));
+	expectFixed(customFormAnsi, "Other: ", customFormAnsi);
+	const partialForm = form.givenAnswers();
+	if (!partialForm) throw new Error(`Current HTML Ask form lost the partial answer; rendered=${formAnsi}`);
+	expectValue(partialForm.data, { features: ["submit-value", "custom reply"] },
+		"Current HTML Ask form changed partial field values", formNativeText);
+	expectValue(partialForm.notes, [], "Current HTML Ask form changed partial option notes", formNativeText);
+	form.handleInput("\t");
+	const foldedFormNative = form.describe?.(nativeContext(false));
+	if (!foldedFormNative) throw new Error("Current HTML Ask form did not describe its folded state");
+	const foldedFormText = collectStrings(foldedFormNative).join("\n");
+	expectFixed(foldedFormText, "Show every option", foldedFormText);
+	expectFoldedOther(foldedFormNative, `${expectedText("Other: ")}custom reply`, foldedFormText);
+	form.handleNativeEvent({ type: "action", key: "actions", act: "submit", mods: [] });
+	expect(!formCancelled && formResult !== undefined, "Current HTML Ask form did not submit through its native action", foldedFormText);
+	expectValue(formResult, { token: "Settings", features: ["submit-value", "custom reply"], response: "" },
+		"Current HTML Ask form changed submitted form fields or hidden values", foldedFormText);
+	expectValue(formNotes, [], "Current HTML Ask form changed submitted notes", foldedFormText);
+	form.dispose();
+}
 
 let approvalApproved = false;
 let approvalDenied = false;

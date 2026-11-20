@@ -3,6 +3,7 @@ import type { MenuModule, MenuPatch } from "./menu-catalog";
 const DASHBOARD_MENU_TEXT = [
 	"Usage", "Usage · Details", "refreshing…", "checked {duration} ago", "r refresh · ", "{keys} scroll · ",
 	"{key} details · {cancel} close", "{cancel} back", "Close", "Exhausted", "Under pressure", "OK", "Unknown",
+	"exhausted",
 	"Resets {date} {year}, {time} (in {duration})", "Resets {date} {year}, {time}", "resets in {duration}", "resets {time}", "resets {weekday} {time}", "resets {day} {month}",
 	"{count} accts", "daybreak · {name}", "{count} reset", "{count} resets", "{count} usable", "{count} usable now",
 	"expires {duration}", "expires in {duration}", "expired", "unavailable: {reason}", "{account} — usage unavailable",
@@ -107,7 +108,7 @@ function literal(before: string, key = before, count = 1): MenuPatch {
 const usageDashboardPatches: readonly MenuPatch[] = [
 	literal("Usage", "Usage", 3),
 	literal("Usage · Details"),
-	literal("Exhausted"),
+	exact('? "Exhausted"', '? ' + text("Exhausted")),
 	literal("Under pressure"),
 	literal("OK"),
 	literal("Unknown"),
@@ -122,7 +123,6 @@ const usageDashboardPatches: readonly MenuPatch[] = [
 	literal("expired"),
 	exact('`${account} — usage unavailable`', '__zhompMenuText("{account} — usage unavailable", { account })'),
 	literal("no limits", "No limits"),
-	exact('window.usedText ?? "no data"', 'window.usedText ?? __zhompMenuText("no data")'),
 	exact('`+${hidden} more`', '__zhompMenuText("+{count} more", { count: hidden })'),
 	exact('`untouched: ${names}`', '__zhompMenuText("untouched: {names}", { names })'),
 	literal("No usage data available.", "No usage data available.", 3),
@@ -176,7 +176,6 @@ literal("No activity yet"),
 	exact('`Daybreak · ${name}`', '__zhompMenuText("Daybreak · {name}", { name })'),
 	exact('`Daybreak access · ${name}`', '__zhompMenuText("Daybreak access · {name}", { name })'),
 exact('`${name}: no usage data`', '__zhompMenuText("{name}: no usage data", { name })', 2),
-exact('formatAbsoluteOnlyAmount([limit]) ?? "No data"', 'formatAbsoluteOnlyAmount([limit]) ?? __zhompMenuText("No data")'),
 	exact('`${hidden} more in Details`', '__zhompMenuText("{count} more in Details", { count: hidden })'),
 	literal("Details lists every quota per account  ⏎"),
 	exact('label: [span("Syncing", "dim")]', 'label: [span(__zhompMenuText("Syncing"), "dim")]'),
@@ -194,7 +193,7 @@ exact('formatAbsoluteOnlyAmount([limit]) ?? "No data"', 'formatAbsoluteOnlyAmoun
 	exact('` · expired (${date})`', '` · ${__zhompMenuText(" · expired ({date})", { date })}`'),
 	exact('` · unavailable: ${sanitizeDisplayLine(resets.unavailableReason)}`', '` · ${__zhompMenuText(" · unavailable: {reason}", { reason: sanitizeDisplayLine(resets.unavailableReason) })}`'),
 ];
-const usageDashboardVariants: readonly (readonly MenuPatch[])[] = [
+const usageDashboardResetVariants: readonly (readonly MenuPatch[])[] = [
 	[
 		exact('`resets ${clockTime(at)}`', '__zhompMenuText("resets {time}", { time: clockTime(at) })'),
 		exact('`resets ${WEEKDAY_NAMES[at.getDay()]} ${clockTime(at)}`', '__zhompMenuText("resets {weekday} {time}", { weekday: WEEKDAY_NAMES[at.getDay()], time: clockTime(at) })'),
@@ -209,6 +208,22 @@ const usageDashboardVariants: readonly (readonly MenuPatch[])[] = [
 	[...patches, exact('`${scrollHint}${refreshHint}${cancel} back`', '__zhompMenuText("{scroll}{refresh}{cancel} back", { scroll: scrollHint, refresh: refreshHint, cancel })')],
 	[...patches, exact('`${scrollHint}${refreshHint}${formatKeyHint("tab")} overview · ${cancel} back`', '__zhompMenuText("{scroll}{refresh}{key} overview · {cancel} back", { scroll: scrollHint, refresh: refreshHint, key: formatKeyHint("tab"), cancel })')],
 ]);
+
+const usageDashboardAmountVariants: readonly (readonly MenuPatch[])[] = [
+	[
+		exact('window.usedText ?? "no data"', 'window.usedText ?? __zhompMenuText("no data")'),
+		exact('window.usedText ?? "No data"', 'window.usedText ?? __zhompMenuText("No data")'),
+		exact('formatAbsoluteOnlyAmount([limit]) ?? "No data"', 'formatAbsoluteOnlyAmount([limit]) ?? __zhompMenuText("No data")'),
+	],
+	[
+		exact('const CARD_AMOUNT_LABELS = { exhausted: "exhausted", noData: "no data" } as const;', 'const CARD_AMOUNT_LABELS = { exhausted: __zhompMenuText("exhausted"), noData: __zhompMenuText("no data") } as const;'),
+		exact('const NATIVE_AMOUNT_LABELS = { exhausted: "Exhausted", noData: "No data" } as const;', 'const NATIVE_AMOUNT_LABELS = { exhausted: __zhompMenuText("Exhausted"), noData: __zhompMenuText("No data") } as const;'),
+	],
+];
+
+const usageDashboardVariants = usageDashboardResetVariants.flatMap(resetPatches =>
+	usageDashboardAmountVariants.map(amountPatches => [...resetPatches, ...amountPatches]),
+);
 
 const usageDisplayPatches: readonly MenuPatch[] = [
 	exact('`cooldown until ${reset.cooldownUntil}`', '__zhompMenuText("cooldown until {time}", { time: reset.cooldownUntil })'),

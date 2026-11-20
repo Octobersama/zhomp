@@ -103,13 +103,32 @@ interface HostCustomCommandModule {
 	AnnotateCommand: new (api: { cwd: string }) => HostCustomCommand;
 }
 
+interface SettingsSurfaceOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+type SettingsSurfaceOptions = readonly SettingsSurfaceOption[] | "runtime";
+
+interface SettingsUiMetadata {
+	tab?: string;
+	group?: string;
+	label?: string;
+	description?: string;
+	warning?: string;
+	condition?: string;
+	options?: SettingsSurfaceOptions;
+}
 interface HostSetting {
 	id: string;
+	type: string;
 	default: unknown;
 	enumValues: unknown;
+	isCredential?: boolean;
 	envName?: string;
 	envValue(): unknown;
-	ui?: { label?: string; description?: string };
+	ui?: SettingsUiMetadata;
 }
 
 interface RawSettingDescription {
@@ -119,10 +138,39 @@ interface RawSettingDescription {
 	source: string;
 }
 
+interface RawSettingDisplayMetadata {
+	path: string;
+	type: string;
+	defaultValue: unknown;
+	enumValues: unknown;
+	credential: boolean | undefined;
+	tab: string | undefined;
+	condition: string | undefined;
+	label: string | undefined;
+	group: string | undefined;
+	warning: string | undefined;
+	options: SettingsSurfaceOptions | undefined;
+}
+
+interface LogicalSettingSnapshot {
+	id: string;
+	type: string;
+	default: unknown;
+	enumValues: unknown;
+	credential: boolean | undefined;
+	tab: string | undefined;
+	condition: string | undefined;
+	optionValues: readonly string[] | "runtime" | undefined;
+}
+
 interface SettingsSurfaceEntry {
 	path: string;
+	type: string;
 	defaultValue: unknown;
-	ui?: { label?: string; description?: string };
+	enumValues?: unknown;
+	credential?: boolean;
+	condition?: () => boolean;
+	ui?: SettingsUiMetadata;
 }
 
 interface SettingsSurfaceHost {
@@ -202,6 +250,103 @@ function readRawSettingDescriptions(settings: readonly HostSetting[]): RawSettin
 		descriptions.push({ path: setting.id, ui, descriptor, source });
 	}
 	return descriptions;
+}
+
+function readRawSettingDisplayMetadata(settings: readonly HostSetting[]): RawSettingDisplayMetadata[] {
+	const metadata: RawSettingDisplayMetadata[] = [];
+	for (const setting of settings) {
+		const ui = setting.ui;
+		if (!ui) continue;
+		const rawOptions = ui.options;
+		const options = Array.isArray(rawOptions)
+			? rawOptions.map(option => ({ value: option.value, label: option.label, description: option.description }))
+			: rawOptions;
+		metadata.push({
+			path: setting.id,
+			type: setting.type,
+			defaultValue: setting.default,
+			enumValues: setting.enumValues,
+			credential: setting.isCredential,
+			tab: ui.tab,
+			condition: ui.condition,
+			label: ui.label,
+			group: ui.group,
+			warning: ui.warning,
+			options,
+		});
+	}
+	return metadata;
+}
+
+function readLogicalSettingsSnapshot(settings: readonly HostSetting[]): LogicalSettingSnapshot[] {
+	const snapshots: LogicalSettingSnapshot[] = [];
+	for (const setting of settings) {
+		const rawOptions = setting.ui?.options;
+		snapshots.push({
+			id: setting.id,
+			type: setting.type,
+			default: setting.default,
+			enumValues: setting.enumValues,
+			credential: setting.isCredential,
+			tab: setting.ui?.tab,
+			condition: setting.ui?.condition,
+			optionValues: rawOptions === "runtime" ? rawOptions : rawOptions?.map(option => option.value),
+		});
+	}
+	return snapshots;
+}
+
+function translateDictionaryText(dictionary: Record<string, string>, source: string): string {
+	return Object.hasOwn(dictionary, source) ? dictionary[source] ?? source : source;
+}
+
+function assertTranslatedSettingsMetadata(
+	surface: SettingsSurfaceHost,
+	sources: readonly RawSettingDisplayMetadata[],
+	dictionary: Record<string, string>,
+): void {
+	for (const source of sources) {
+		const entry = surface.entries.find(candidate => candidate.path === source.path);
+		if (!entry) throw new Error(`Missing real settings entry: ${source.path}`);
+		strictEqual(entry.type, source.type, `${source.path} type`);
+		deepStrictEqual(entry.defaultValue, source.defaultValue, `${source.path} default`);
+		deepStrictEqual(entry.enumValues, source.enumValues, `${source.path} enum values`);
+		strictEqual(entry.credential, source.credential, `${source.path} credential flag`);
+		strictEqual(entry.ui?.tab, source.tab, `${source.path} tab ID`);
+		strictEqual(entry.ui?.condition, source.condition, `${source.path} condition ID`);
+		strictEqual(typeof entry.condition, source.condition === undefined ? "undefined" : "function", `${source.path} condition handler`);
+		for (const key of ["label", "group", "warning"] as const) {
+			const text = source[key];
+			if (text !== undefined) {
+				strictEqual(entry.ui?.[key], translateDictionaryText(dictionary, text), `${source.path} ${key}`);
+			}
+		}
+
+		if (source.options === "runtime") {
+			strictEqual(entry.ui?.options, "runtime", `${source.path} runtime options`);
+			continue;
+		}
+		if (source.options === undefined) {
+			strictEqual(entry.ui?.options, undefined, `${source.path} options`);
+			continue;
+		}
+		const options = entry.ui?.options;
+		if (options === undefined || options === "runtime") throw new Error(`Missing real settings options: ${source.path}`);
+		strictEqual(options.length, source.options.length, `${source.path} option count`);
+		for (const [index, sourceOption] of source.options.entries()) {
+			const option: SettingsSurfaceOption | undefined = options[index];
+			if (!option) throw new Error(`Missing real settings option: ${source.path}[${index}]`);
+			strictEqual(option.value, sourceOption.value, `${source.path} option ${index} value`);
+			const label = sourceOption.label === sourceOption.value
+				? sourceOption.label
+				: translateDictionaryText(dictionary, sourceOption.label);
+			strictEqual(option.label, label, `${source.path} option ${index} label`);
+			const description = sourceOption.description === undefined
+				? undefined
+				: translateDictionaryText(dictionary, sourceOption.description);
+			strictEqual(option.description, description, `${source.path} option ${index} description`);
+		}
+	}
 }
 
 function renderTemplate(template: string, values: Record<string, string>): string {
@@ -334,10 +479,19 @@ try {
 	const nativeTabLeads = defs.TAB_LEADS as Record<string, string> | undefined;
 	const nativeTabLeadsBefore = nativeTabLeads ? { ...nativeTabLeads } : undefined;
 	const nativeTabLeadKeysBefore = nativeTabLeads ? Object.keys(nativeTabLeads) : undefined;
+	const nativeTabMetadata = defs.TAB_METADATA as Record<string, { label: string; icon: string }>;
+	const nativeTabMetadataBefore = Object.fromEntries(
+		Object.entries(nativeTabMetadata).map(([tab, metadata]) => [tab, { label: metadata.label, icon: metadata.icon }]),
+	);
+	const nativeTabGroups = defs.TAB_GROUPS as Record<string, readonly string[]>;
+	const nativeTabGroupValuesBefore = Object.fromEntries(
+		Object.entries(nativeTabGroups).map(([tab, groups]) => [tab, [...groups]]),
+	);
 	theme.initThemeSync("unicode");
 	const dark = settings.find(setting => setting.ui?.label === "Dark Theme");
 	if (!dark) throw new Error("real settings registry is missing Dark Theme metadata");
 	const rawSettingDescriptions = readRawSettingDescriptions(settings);
+	const rawSettingDisplayMetadata = readRawSettingDisplayMetadata(settings);
 	const hasGetterDescriptionTemplate = rawSettingDescriptions.some(
 		description => description.descriptor?.get && Object.hasOwn(getterDescriptionTemplateKeys, description.path),
 	);
@@ -366,7 +520,7 @@ try {
 	}
 	const loopGuardSourceDescription = loopGuard.ui.description;
 	const searchEndpointSourceDescription = searchEndpoint.ui.description;
-	const logicalBefore = settings.map(setting => ({ id: setting.id, default: setting.default, enumValues: setting.enumValues }));
+	const logicalBefore = readLogicalSettingsSnapshot(settings);
 	const groupArrays: Record<string, string[]> = { ...defs.TAB_GROUPS };
 	const appearanceGroupsBefore = [...groupArrays.appearance];
 	const loader = await import(pathToFileURL(Bun.resolveSync("@oh-my-pi/pi-coding-agent/extensibility/extensions/loader", host.packageDir)).href);
@@ -399,6 +553,19 @@ try {
 	strictEqual(defs.TAB_LEADS, nativeTabLeads, "translation must preserve the selected host lead map identity");
 	deepStrictEqual(defs.SETTING_TABS, settingTabIdsBefore, "translation must preserve native tab IDs");
 	if (nativeTabLeads && nativeTabLeadKeysBefore) deepStrictEqual(Object.keys(nativeTabLeads), nativeTabLeadKeysBefore);
+	strictEqual(defs.TAB_METADATA, nativeTabMetadata, "translation must preserve native tab metadata identity");
+	strictEqual(defs.TAB_GROUPS, nativeTabGroups, "translation must preserve native tab groups identity");
+	for (const [tab, source] of Object.entries(nativeTabMetadataBefore)) {
+		const current = nativeTabMetadata[tab];
+		if (!current) throw new Error(`Missing native settings tab metadata: ${tab}`);
+		strictEqual(current.label, translateDictionaryText(dictionary, source.label), `${tab} tab label`);
+		strictEqual(current.icon, source.icon, `${tab} tab icon`);
+	}
+	for (const [tab, groups] of Object.entries(nativeTabGroupValuesBefore)) {
+		const current = nativeTabGroups[tab];
+		if (!current) throw new Error(`Missing native settings tab groups: ${tab}`);
+		deepStrictEqual(current, groups.map(group => translateDictionaryText(dictionary, group)), `${tab} group labels`);
+	}
 	const ui = await import(pathToFileURL(host.settingsUiPath).href) as SettingsUiModule;
 	const expectedOverrideDescription = `${dictionary[loopGuardSourceDescription] ?? loopGuardSourceDescription} ${renderDictionaryTemplate(dictionary, overrideEnvNoteTemplate, { envName: overrideEnvName })}`;
 	const expectedFallbackDescription = `${dictionary[searchEndpointSourceDescription] ?? searchEndpointSourceDescription} ${renderDictionaryTemplate(dictionary, fallbackEnvNoteTemplate, { envName: fallbackEnvName })}`;
@@ -438,6 +605,7 @@ try {
 	}
 	if (!after) throw new Error("Unicode settings surface was not captured");
 	strictEqual(after.entries.find(entry => entry.path === dark.id)?.ui?.label, "深色主题");
+	assertTranslatedSettingsMetadata(after, rawSettingDisplayMetadata, dictionary);
 	strictEqual(tuiGoal.description, goalDescription, "TUI autocomplete localization must not mutate canonical builtin metadata");
 	strictEqual(internalGoal.description, goalDescription, "ACP/RPC canonical builtin metadata remains English");
 	strictEqual(tuiGoal.subcommands?.find(command => command.name === "set")?.description, goalSetDescription);
@@ -588,7 +756,7 @@ try {
 	strictEqual(notifications[0]?.type, "error");
 	ok(notifications[0]?.message.includes("Extension getCommands metadata is unavailable"));
 	for (const handler of sessionShutdownHandlers) handler({}, uiContext);
-	deepStrictEqual(settings.map(setting => ({ id: setting.id, default: setting.default, enumValues: setting.enumValues })), logicalBefore);
+	deepStrictEqual(readLogicalSettingsSnapshot(settings), logicalBefore);
 	for (const [tab, array] of Object.entries(groupArrays)) strictEqual(defs.TAB_GROUPS[tab], array);
 	const themeIndex = appearanceGroupsBefore.indexOf("Theme");
 	if (themeIndex >= 0) strictEqual(defs.TAB_GROUPS.appearance[themeIndex], "主题");

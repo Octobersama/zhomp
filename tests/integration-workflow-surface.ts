@@ -469,6 +469,7 @@ try {
 	for (const module of [...WORKFLOW_MENU_MODULES, genericSelectorModule]) {
 		const sourcePath = moduleFile(launch.host, module);
 		if (!existsSync(sourcePath)) {
+			if (module.path === "src/slash-commands/seance.ts" && launch.host.version.startsWith("19.")) continue;
 			unsupportedModules.push(module.path);
 			continue;
 		}
@@ -559,65 +560,71 @@ try {
 			return translatedFor(path) && genericDisplayAdapterActive ? translated : fallback;
 		};
 
-		const seancePath = realpathSync(join(launch.host.packageDir, "src", "slash-commands", "seance.ts"));
-		const seanceModule = await import(pathToFileURL(seancePath).href) as SeanceCommandApi;
-		if (typeof seanceModule.SEANCE_SLASH_COMMAND.handleTui !== "function") {
-			throw new Error("The installed seance command has no TUI handler");
-		}
-		const seanceDriver = createSelectorDriver(HookSelector, genericDisplayAdapterActive, (_title, options) => {
-			strictEqual(_title, expectedCopy("Consult this session with", "src/slash-commands/seance.ts"));
-			strictEqual(options.length, 2);
-			return 1;
-		});
-		const seanceSessionPath = join(fixtureRoot, "workflow-seance.jsonl");
 		const timestamp = new Date().toISOString();
-		const seanceFixture = [
-			{ type: "session", version: 3, id: "workflow-seance", timestamp, cwd: fixtureRoot },
-			{
-				type: "model_change",
-				id: "workflow-model-change",
-				parentId: null,
-				timestamp,
-				model: "probe-provider/probe-model",
-				role: "default",
-			},
-		].map(entry => JSON.stringify(entry)).join("\n") + "\n";
-		writeFileSync(seanceSessionPath, seanceFixture, "utf8");
-		const showModelSelectorCalls: unknown[] = [];
-		const seanceErrors: string[] = [];
-		const seanceContext: SeanceContext = {
-			sessionManager: { getCwd: () => fixtureRoot, getSessionDir: () => fixtureRoot },
-			session: { effectiveExtensionRoots: undefined },
-			editor: { setText: () => {} },
-			showHookSelector: seanceDriver.showHookSelector,
-			showModelSelector: options => { showModelSelectorCalls.push(options); },
-			showError: message => { seanceErrors.push(message); },
-		};
-		await seanceModule.SEANCE_SLASH_COMMAND.handleTui(
-			{ name: "seance", args: "workflow-seance.jsonl", text: "/seance workflow-seance.jsonl" },
-			{ ctx: seanceContext, draftDetached: true },
-		);
-		strictEqual(seanceDriver.calls.length, 1, "seance must render its saved-model selector for the controlled session fixture");
-		const seanceCall = seanceDriver.calls[0];
-		if (!seanceCall) throw new Error("Missing seance selector evidence");
-		strictEqual(optionLabel(seanceCall.options[0]!), "Use saved model");
-		strictEqual(optionLabel(seanceCall.options[1]!), "Choose another model");
-		const seanceLabels = ["Use saved model", "Choose another model"];
-		const seanceDisplays = seanceLabels.map(label => expectedCopy(label, "src/slash-commands/seance.ts"));
-		const seanceCollision = new Set(seanceDisplays).size !== seanceDisplays.length;
-		for (let index = 0; index < seanceLabels.length; index++) {
-			const label = seanceLabels[index]!;
-			const expected = displayCopy(
-				label,
-				"src/slash-commands/seance.ts",
-				seanceCollision ? label : seanceDisplays[index]!,
-				label,
+		const seanceSource = join(launch.host.packageDir, "src", "slash-commands", "seance.ts");
+		async function probeSeance(Selector: HookSelectorConstructor) {
+			if (!existsSync(seanceSource)) return null;
+			const seancePath = realpathSync(seanceSource);
+			const seanceModule = await import(pathToFileURL(seancePath).href) as SeanceCommandApi;
+			if (typeof seanceModule.SEANCE_SLASH_COMMAND.handleTui !== "function") {
+				throw new Error("The installed seance command has no TUI handler");
+			}
+			const seanceDriver = createSelectorDriver(Selector, genericDisplayAdapterActive, (_title, options) => {
+				strictEqual(_title, expectedCopy("Consult this session with", "src/slash-commands/seance.ts"));
+				strictEqual(options.length, 2);
+				return 1;
+			});
+			const seanceSessionPath = join(fixtureRoot, "workflow-seance.jsonl");
+			const seanceFixture = [
+				{ type: "session", version: 3, id: "workflow-seance", timestamp, cwd: fixtureRoot },
+				{
+					type: "model_change",
+					id: "workflow-model-change",
+					parentId: null,
+					timestamp,
+					model: "probe-provider/probe-model",
+					role: "default",
+				},
+			].map(entry => JSON.stringify(entry)).join("\n") + "\n";
+			writeFileSync(seanceSessionPath, seanceFixture, "utf8");
+			const showModelSelectorCalls: unknown[] = [];
+			const seanceErrors: string[] = [];
+			const seanceContext: SeanceContext = {
+				sessionManager: { getCwd: () => fixtureRoot, getSessionDir: () => fixtureRoot },
+				session: { effectiveExtensionRoots: undefined },
+				editor: { setText: () => {} },
+				showHookSelector: seanceDriver.showHookSelector,
+				showModelSelector: options => { showModelSelectorCalls.push(options); },
+				showError: message => { seanceErrors.push(message); },
+			};
+			await seanceModule.SEANCE_SLASH_COMMAND.handleTui(
+				{ name: "seance", args: "workflow-seance.jsonl", text: "/seance workflow-seance.jsonl" },
+				{ ctx: seanceContext, draftDetached: true },
 			);
-			strictEqual(visibleOptionDisplay(seanceCall, label, genericDisplayAdapterActive), expected);
+			strictEqual(seanceDriver.calls.length, 1, "seance must render its saved-model selector for the controlled session fixture");
+			const seanceCall = seanceDriver.calls[0];
+			if (!seanceCall) throw new Error("Missing seance selector evidence");
+			strictEqual(optionLabel(seanceCall.options[0]!), "Use saved model");
+			strictEqual(optionLabel(seanceCall.options[1]!), "Choose another model");
+			const seanceLabels = ["Use saved model", "Choose another model"];
+			const seanceDisplays = seanceLabels.map(label => expectedCopy(label, "src/slash-commands/seance.ts"));
+			const seanceCollision = new Set(seanceDisplays).size !== seanceDisplays.length;
+			for (let index = 0; index < seanceLabels.length; index++) {
+				const label = seanceLabels[index]!;
+				const expected = displayCopy(
+					label,
+					"src/slash-commands/seance.ts",
+					seanceCollision ? label : seanceDisplays[index]!,
+					label,
+				);
+				strictEqual(visibleOptionDisplay(seanceCall, label, genericDisplayAdapterActive), expected);
+			}
+			strictEqual(seanceCall.choice, "Choose another model", "the selector must return the canonical choice value");
+			strictEqual(showModelSelectorCalls.length, 1, "choosing another model must open only the one-off picker");
+			strictEqual(seanceErrors.length, 0, "seance must accept the isolated session fixture without error");
+			return { renderedTitle: seanceCall.title, canonicalChoice: seanceCall.choice, oneOffPickerOpened: showModelSelectorCalls.length === 1 };
 		}
-		strictEqual(seanceCall.choice, "Choose another model", "the selector must return the canonical choice value");
-		strictEqual(showModelSelectorCalls.length, 1, "choosing another model must open only the one-off picker");
-		strictEqual(seanceErrors.length, 0, "seance must accept the isolated session fixture without error");
+		const seance = await probeSeance(HookSelector);
 
 		const dependencyBin = join(dirname(dirname(fileURLToPath(import.meta.url))), "node_modules", ".bin");
 		const checkerSearchPath = [dependencyBin, process.env.PATH ?? ""].filter(Boolean).join(delimiter);
@@ -941,7 +948,7 @@ try {
 			hostSourcesSupported: [...supportedModules],
 			genericDisplayAdapterActive,
 			consumerEvidence: {
-				seance: { renderedTitle: seanceCall.title, canonicalChoice: seanceCall.choice, oneOffPickerOpened: showModelSelectorCalls.length === 1 },
+				seance,
 				confirmation: {
 					title: confirmTitle,
 					message: confirmMessage,

@@ -23,18 +23,22 @@ test("filesystem identity accepts directory aliases and rejects different direct
 	} finally { removeTree(root); }
 });
 
-test("installation rejects older hosts but accepts compatible updates", () => {
+test("installation rejects unsupported hosts but accepts compatible updates", () => {
 	const root = makeTempDir("zhomp-version");
 	try {
 		const oldHost = createHostFixture(join(root, "18.3.1"), "18.3.1");
 		const oldHome = join(root, "old-home");
 		throws(() => install(repoDir, { OMP_ZH_HOME: oldHome, OMP_ZH_PACKAGE_DIR: oldHost }));
 		strictEqual(existsSync(oldHome), false);
-		for (const newer of [minimumVersion, "18.4.1"]) {
-			const host = createHostFixture(join(root, newer), newer);
-			const result = install(repoDir, { OMP_ZH_HOME: join(root, `home-${newer}`), OMP_ZH_PACKAGE_DIR: host });
+		for (const compatibleVersion of [minimumVersion, "18.4.1", "19.0.1"]) {
+			const host = createHostFixture(join(root, compatibleVersion), compatibleVersion);
+			const result = install(repoDir, { OMP_ZH_HOME: join(root, `home-${compatibleVersion}`), OMP_ZH_PACKAGE_DIR: host });
 			strictEqual(sameFileSystemEntry(result.packageDir, host), true);
 		}
+		const unsupportedHost = createHostFixture(join(root, "20.0.0"), "20.0.0");
+		const unsupportedHome = join(root, "unsupported-home");
+		throws(() => install(repoDir, { OMP_ZH_HOME: unsupportedHome, OMP_ZH_PACKAGE_DIR: unsupportedHost }));
+		strictEqual(existsSync(unsupportedHome), false);
 		const broken = createHostFixture(join(root, "broken"), "18.4.1");
 		rmSync(join(broken, "src", "config", "all-settings.ts"));
 		throws(() => validatePackage(broken, range));

@@ -12,6 +12,9 @@ export const MANAGEMENT_MENU_TEXT_KEYS: readonly string[] = [
 	"Remove OAuth auth from an MCP server",
 	"Enable an MCP server",
 	"Disable an MCP server",
+	"Replaced by built-ins",
+	" (/mcp enable <name> connects one anyway):",
+	"replaced:",
 	"Search Smithery registry and deploy from picker",
 	"Login to Smithery and cache API key",
 	"Remove cached Smithery API key",
@@ -129,6 +132,8 @@ export const MANAGEMENT_MENU_TEXT_KEYS: readonly string[] = [
 	"Context window",
 	"File",
 	"ID",
+	"Local",
+	"Local:",
 	"Build",
 	"Build {index}",
 	"Builds {first}–{last}",
@@ -623,7 +628,7 @@ const SESSION_INFO_HEADINGS: Readonly<Record<string, string>> = {
 \t"MCP Servers": __zhompMenuText("MCP Servers"),
 };
 const SESSION_INFO_FIELDS: Readonly<Record<string, string>> = {
-\tFile: __zhompMenuText("File"), ID: __zhompMenuText("ID"), Build: __zhompMenuText("Build"), Running: __zhompMenuText("Running"),
+\tFile: __zhompMenuText("File"), ID: __zhompMenuText("ID"), Local: __zhompMenuText("Local"), Build: __zhompMenuText("Build"), Running: __zhompMenuText("Running"),
 \tName: __zhompMenuText("Name"), Model: __zhompMenuText("Model"), API: __zhompMenuText("API"),
 \tAuth: __zhompMenuText("Auth"), Endpoint: __zhompMenuText("Endpoint"), Source: __zhompMenuText("Source"),
 \tTransport: __zhompMenuText("Transport"), WebSocket: __zhompMenuText("WebSocket"), Reuse: __zhompMenuText("Reuse"),
@@ -693,7 +698,6 @@ const sessionInfoPatches = patches([
 	['this.#describeEntries(entries, head === "Provider")', 'this.#describeEntries(entries, head === "Provider", head)', 1],
 	['#describeEntries(entries: readonly KvReportEntry[], mono: boolean): NativeChild[]', '#describeEntries(entries: readonly KvReportEntry[], mono: boolean, section: string): NativeChild[]', 1],
 	['if (!("k" in entry)) {\n\t\t\t\tflush();\n\t\t\t\tchildren.push(text(entry.line, { wrap: "word", role: "omp.info.note" }));\n\t\t\t\tcontinue;\n\t\t\t}', 'if (!("k" in entry)) {\n\t\t\t\tflush();\n\t\t\t\tconst value = joined(entry.line);\n\t\t\t\tconst isEmptyState = (section === "Provider" && value === "No model selected") || (section === "MCP Servers" && value === "None connected");\n\t\t\t\tchildren.push(text(isEmptyState ? [span(__zhompMenuText(value), "dim")] : entry.line, { wrap: "word", role: "omp.info.note" }));\n\t\t\t\tcontinue;\n\t\t\t}', 1],
-    ['span(path, "path")', 'span(path === "In-memory" ? __zhompMenuText(path) : path, "path")', 1],
     ['span(path, "muted")', 'span(path === "In-memory" ? __zhompMenuText(path) : path, "muted")', 1],
 	['head: sentenceCase(g.head),', 'head: SESSION_INFO_HEADINGS[g.head] ?? g.head,', 1],
 	['const title = `${context.tokens.toLocaleString("en-US")} of ${context.contextWindow.toLocaleString("en-US")} tokens`;', 'const title = __zhompMenuText("{tokens} of {contextWindow} tokens", { tokens: context.tokens.toLocaleString("en-US"), contextWindow: context.contextWindow.toLocaleString("en-US") });', 1],
@@ -841,11 +845,33 @@ export const MANAGEMENT_MENU_MODULES: readonly MenuModule[] = [
 				['"                        Search Smithery registry and deploy from picker"', '`                        ${__zhompMenuText("Search Smithery registry and deploy from picker")}`', 1],
 				['"  /mcp smithery-login   Login to Smithery and cache API key"', '`  /mcp smithery-login   ${__zhompMenuText("Login to Smithery and cache API key")}`', 1],
 				['"  /mcp smithery-logout  Remove cached Smithery API key"', '`  /mcp smithery-logout  ${__zhompMenuText("Remove cached Smithery API key")}`', 1],
+				['theme.fg("accent", "Replaced by built-ins")', 'theme.fg("accent", "Replaced by built-ins")', 0],
+				['theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 'theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 0],
+				['theme.fg("warning", " ◌ replaced:")', 'theme.fg("warning", " ◌ replaced:")', 0],
 			]),
 			patches([
 				['"                        Search Smithery registry and deploy from picker"', '"                        Search Smithery registry and deploy from picker"', 0],
 				['"  /mcp smithery-login   Login to Smithery and cache API key"', '"  /mcp smithery-login   Login to Smithery and cache API key"', 0],
 				['"  /mcp smithery-logout  Remove cached Smithery API key"', '"  /mcp smithery-logout  Remove cached Smithery API key"', 0],
+				['theme.fg("accent", "Replaced by built-ins")', 'theme.fg("accent", "Replaced by built-ins")', 0],
+				['theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 'theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 0],
+				['theme.fg("warning", " ◌ replaced:")', 'theme.fg("warning", " ◌ replaced:")', 0],
+			]),
+			patches([
+				['"                        Search Smithery registry and deploy from picker"', '`                        ${__zhompMenuText("Search Smithery registry and deploy from picker")}`', 1],
+				['"  /mcp smithery-login   Login to Smithery and cache API key"', '`  /mcp smithery-login   ${__zhompMenuText("Login to Smithery and cache API key")}`', 1],
+				['"  /mcp smithery-logout  Remove cached Smithery API key"', '`  /mcp smithery-logout  ${__zhompMenuText("Remove cached Smithery API key")}`', 1],
+				['theme.fg("accent", "Replaced by built-ins")', 'theme.fg("accent", __zhompMenuText("Replaced by built-ins"))', 1],
+				['theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 'theme.fg("muted", __zhompMenuText(" (/mcp enable <name> connects one anyway):"))', 1],
+				['theme.fg("warning", " ◌ replaced:")', 'theme.fg("warning", ` ◌ ${__zhompMenuText("replaced:")}`)', 1],
+			]),
+			patches([
+				['"                        Search Smithery registry and deploy from picker"', '"                        Search Smithery registry and deploy from picker"', 0],
+				['"  /mcp smithery-login   Login to Smithery and cache API key"', '"  /mcp smithery-login   Login to Smithery and cache API key"', 0],
+				['"  /mcp smithery-logout  Remove cached Smithery API key"', '"  /mcp smithery-logout  Remove cached Smithery API key"', 0],
+				['theme.fg("accent", "Replaced by built-ins")', 'theme.fg("accent", __zhompMenuText("Replaced by built-ins"))', 1],
+				['theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 'theme.fg("muted", __zhompMenuText(" (/mcp enable <name> connects one anyway):"))', 1],
+				['theme.fg("warning", " ◌ replaced:")', 'theme.fg("warning", ` ◌ ${__zhompMenuText("replaced:")}`)', 1],
 			]),
 		],
 	},
@@ -853,17 +879,29 @@ export const MANAGEMENT_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/overlays/agent-hub.ts", patches: agentHubPatches },
 	{ root: "tui", path: "src/overlays/agent-hub-renderer.ts", patches: agentHubRendererPatches },
 	{ root: "tui", path: "src/overlays/agents-hub.ts", patches: agentsHubPatches },
-	{ root: "tui", path: "src/overlays/session-info-overlay.ts", patches: sessionInfoPatches },
+	{
+		root: "tui",
+		path: "src/overlays/session-info-overlay.ts",
+		patches: sessionInfoPatches,
+		variants: [
+			[{ before: 'identityField("Local",', after: 'identityField("Local",', count: 0 }],
+			[{ before: 'identityField("Local",', after: 'identityField(__zhompMenuText("Local"),', count: 1 }],
+		],
+	},
 	{
 		root: "agent", path: "src/modes/controllers/command-controller.ts", patches: commandControllerPatches,
 		variants: [
-			patches([['title: "Context Usage",', 'title: __zhompMenuText("Context Usage"),', 1]]),
-			// /context now owns its chrome in ContextViewer; the old report title must be absent.
 			patches([
+				['title: "Context Usage",', 'title: __zhompMenuText("Context Usage"),', 1],
+				['theme.fg("dim", "Local:")', 'theme.fg("dim", "Local:")', 0],
+			]),
+			// /context now owns its chrome in ContextViewer; the old report title must be absent.
+			...[0, 1].map(localFields => patches([
 				['title: "Context Usage",', 'title: __zhompMenuText("Context Usage"),', 0],
 				['this.ctx.showWarning("Context usage is unavailable: no model is selected for this session.")', 'this.ctx.showWarning(__zhompMenuText("Context usage is unavailable: no model is selected for this session."))'],
 				['this.ctx.showWarning("Context usage is unavailable: the model\'s context window is unknown or invalid.")', 'this.ctx.showWarning(__zhompMenuText("Context usage is unavailable: the model\'s context window is unknown or invalid."))'],
-			]),
+				['theme.fg("dim", "Local:")', 'theme.fg("dim", __zhompMenuText("Local:"))', localFields],
+			])),
 		],
 	},
 ];

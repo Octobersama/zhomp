@@ -62,7 +62,9 @@ for (const module of catalogue.MENU_MODULES) {
 }
 deepStrictEqual(syntaxFailures, [], "Generated interface modules must compile before any host module is imported");
 if (process.env.MENU_CATALOG_REQUIRE_ALL === "1") {
-	deepStrictEqual(absent, [], "The current adaptation target must expose every catalogued module");
+	// OMP 19 removed /seance. Keep its adapter and strict presence check for the 18.x host.
+	const expectedAbsent = launch.host.version.startsWith("19.") ? ["agent:src/slash-commands/seance.ts"] : ["tui:src/native/ask-card.ts"];
+	deepStrictEqual(absent, expectedAbsent, "Unexpected catalogued module inventory for this host");
 	deepStrictEqual(unsupported, [], `The current adaptation target must accept every exact menu source shape: ${JSON.stringify(sourceFailures)}`);
 }
 

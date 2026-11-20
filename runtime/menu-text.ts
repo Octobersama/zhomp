@@ -10,6 +10,7 @@ import { EXTENSION_MENU_TEXT_KEYS } from "./menu-extensions";
 import { SETUP_MENU_TEXT_KEYS } from "./menu-setup";
 import { STARTUP_MENU_TEXT_KEYS } from "./menu-startup";
 import { WELCOME_MENU_TEXT_KEYS } from "./menu-welcome";
+import { PROCESS_MENU_TEXT_KEYS } from "./menu-process";
 
 const BASE_MENU_TEXT_KEYS: readonly string[] = [
 	"Rename Session",
@@ -398,6 +399,19 @@ const BASE_MENU_TEXT_KEYS: readonly string[] = [
 	"pick the point to continue from",
 	"No items match \"{query}\"",
 	"{upDown} step  {leftRight} user turns  {enter} rewind  {cancel} show all",
+	"Task / Main",
+	"Thinking",
+	"{key} provider",
+	" · {left}/{right} thinking",
+	"{upDown} models · {enter} use for Task subagents · {provider} · type to search · {close}",
+	"{upDown} models · {enter} use for this session · {provider}{level} · type to search · @ quick roles · {close}",
+	" · no thinking",
+	" · thinking ",
+	"Search Task models…",
+	"Search, @ for roles…",
+	"{model} picks its own effort",
+	"{model} does not reason",
+	"Auto", "Off", "Min", "Low", "Med", "High", "XHigh", "Max",
 	"Yes",
 	"No",
 ];
@@ -416,4 +430,5 @@ export const MENU_TEXT_KEYS: readonly string[] = [...new Set([
 	...SETUP_MENU_TEXT_KEYS,
 	...STARTUP_MENU_TEXT_KEYS,
 	...WELCOME_MENU_TEXT_KEYS,
+	...PROCESS_MENU_TEXT_KEYS,
 ])];

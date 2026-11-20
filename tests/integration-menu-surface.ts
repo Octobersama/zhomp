@@ -249,12 +249,14 @@ const shippedDictionary = parseDictionaryText(readFileSync(launch.dictPath, "utf
 const hostileStatus = '会话选择"; globalThis.__zhompMenuInjected = true; // $&';
 const hostileFooter = '方向键 {upDown} · {enter} 选择模型 · 输入搜索 · {close} "; globalThis.__zhompMenuInjected = true; // $&';
 const footerKey = "{upDown} models · {enter} select model · type to search · {close}";
+const composerFooterKey = "{upDown} models · {enter} use for this session · {provider}{level} · type to search · @ quick roles · {close}";
 const statusKey = "Selection only — does not change the session model";
 const dictionary = mode === "hostile"
 	? {
 		...shippedDictionary,
 		[statusKey]: hostileStatus,
 		[footerKey]: hostileFooter,
+		[composerFooterKey]: hostileFooter.replace("{close}", "{provider}{level} · {close}"),
 		High: "恶意文案-HIGH",
 		[oauthProvider.id]: "恶意-provider-id",
 		[oauthProvider.name]: "恶意-provider-name",
@@ -348,10 +350,12 @@ try {
 	const modelPickerSupported = menuSourceSupported(launch.host, dictionary, "src/overlays/model-picker.ts");
 	const modelPickerCatalogModule = MENU_MODULES.find(module => module.root === "tui" && module.path === "src/overlays/model-picker.ts");
 	if (!modelPickerCatalogModule) throw new Error("The model-picker menu source adapter is missing");
-	const selectOnlyPatch = modelPickerCatalogModule.patches.find(patch => patch.before.includes("selectionOnly ?"));
-	if (!selectOnlyPatch) throw new Error("The model-picker source adapter is missing its select-only marker");
+	const modelPickerPatches = [...modelPickerCatalogModule.patches, ...(modelPickerCatalogModule.variants ?? []).flat()];
+	const selectOnlyPatch = modelPickerPatches.find(patch => patch.before.includes("selectionOnly ?"));
+	if (!selectOnlyPatch) throw new Error("The model-picker menu adapter is missing its legacy select-only marker");
 	const modelPickerSource = readFileSync(join(launch.host.tuiDir, ...modelPickerCatalogModule.path.split("/")), "utf8");
 	const selectionOnlyAvailable = modelPickerSource.includes(selectOnlyPatch.before);
+	const composerPicker = modelPickerSource.includes('anchor: "composer",');
 	const modelPicker = new modelPickerModule.ModelPickerComponent(
 		{ terminal: { rows: 32 }, requestRender() { throw new Error("Unexpected menu rerender"); } },
 		modelSettings,
@@ -375,42 +379,36 @@ try {
 		feature() { return false; },
 	};
 	const pickerProps = nativePickerProps(modelPicker, pickerContext);
-	const modelNativeTitleKey = selectionOnlyAvailable ? "Select model" : "Switch model";
-	const expectedModelTitle = mode !== "ordinary" && modelPickerSupported ? dictionary[modelNativeTitleKey] : modelNativeTitleKey;
+	const modelText = (key: string) => mode !== "ordinary" && modelPickerSupported ? dictionary[key] : key;
 	if (pickerProps) {
-		strictEqual(pickerProps.title, expectedModelTitle, "native model-picking chrome must follow source capability and authorization");
 		strictEqual(pickerProps.selected, selector, "native picker selection must keep its model selector ID");
 		const nativeActions = pickerProps.actions;
 		if (!Array.isArray(nativeActions)) throw new Error("The native model picker did not expose actions");
-		let selectAction: Record<string, unknown> | undefined;
-		for (const action of nativeActions) {
-			if (action !== null && typeof action === "object" && !Array.isArray(action)) {
-				const candidate = action as Record<string, unknown>;
-				if (candidate.id === "use") selectAction = candidate;
-			}
+		const useAction = nativeActions.find(action => action !== null && typeof action === "object" && "id" in action && action.id === "use");
+		if (composerPicker) {
+			strictEqual(pickerProps.title, undefined, "the composer picker uses its search field as the heading");
+			strictEqual(pickerProps.placeholder, modelText("Search, @ for roles…"), "native search placeholder must follow source capability and authorization");
+			strictEqual(useAction, undefined, "the composer picker activates rows directly rather than exposing a use action");
+		} else {
+			strictEqual(pickerProps.title, modelText(selectionOnlyAvailable ? "Select model" : "Switch model"), "native model title must follow source capability and authorization");
+			ok(useAction && "label" in useAction, "the legacy picker must expose its use action");
+			strictEqual(useAction.label, modelText(selectionOnlyAvailable ? "Select model" : "Use for session"));
 		}
-		if (!selectAction) throw new Error("The native model picker did not expose its select action");
-		strictEqual(selectAction.label, expectedModelTitle);
 	}
 	const modelAnsiTitleKey = selectionOnlyAvailable ? "Select Model" : "Switch Model";
-	const ansiModelTitleCandidates = [
-		...(mode !== "ordinary" && modelPickerSupported ? [dictionary[modelAnsiTitleKey]] : []),
-		modelAnsiTitleKey,
-		"Switch Task Model",
-	];
-	const ansiModelTitle = ansiModelTitleCandidates.find(title => pickerAnsi.includes(title));
-	if (!ansiModelTitle) throw new Error("The installed model picker rendered no recognized fixed heading");
-	const modelPickerTitle = typeof pickerProps?.title === "string" ? pickerProps.title : ansiModelTitle;
+	const ansiModelTitle = modelText(modelAnsiTitleKey);
+	ok(pickerAnsi.includes(ansiModelTitle), `ANSI picker missed expected heading ${JSON.stringify(ansiModelTitle)}`);
 	ok(pickerAnsi.includes(selector), "ANSI picker rows must retain the original provider/model selector");
 	const pickerStatusKey = selectionOnlyAvailable ? statusKey : "Session-only switch — role models stay unchanged";
 	const statusExpected = mode !== "ordinary" && modelPickerSupported ? dictionary[pickerStatusKey] : pickerStatusKey;
 	ok(pickerAnsi.includes(statusExpected), `ANSI picker missed expected ${JSON.stringify(statusExpected)}; actual rendered ANSI: ${JSON.stringify(pickerAnsi)}`);
-	const hostileTemplateLiteral = mode === "hostile" && modelPickerSupported && selectionOnlyAvailable &&
+	const hostileTemplateAvailable = selectionOnlyAvailable || composerPicker;
+	const hostileTemplateLiteral = mode === "hostile" && modelPickerSupported && hostileTemplateAvailable &&
 		pickerAnsi.includes("方向键") && pickerAnsi.includes("globalThis.__zhompMenuInjected = true; // $&");
 	if (mode === "hostile") {
 		strictEqual((globalThis as typeof globalThis & { __zhompMenuInjected?: boolean }).__zhompMenuInjected, false, "hostile fixed menu copy must not execute as code");
 		ok(pickerAnsi.includes(model.provider) && pickerAnsi.includes(model.id) && pickerAnsi.includes(model.name), "hostile translations must not rewrite model, provider, or display data");
-		if (modelPickerSupported) ok(hostileTemplateLiteral, "placeholder-bearing dictionary text must render literally with its dynamic keys");
+		if (modelPickerSupported && hostileTemplateAvailable) ok(hostileTemplateLiteral, "placeholder-bearing dictionary text must render literally with its dynamic keys");
 	}
 	for (const character of "provider") modelPicker.handleInput(character);
 	const searchedPickerAnsi = Bun.stripANSI(modelPicker.render(120).join("\n"));
@@ -422,12 +420,14 @@ try {
 	strictEqual(selections.length, 1, "Enter must activate the selected real model row");
 	strictEqual(selections[0]?.model, model, "keyboard selection must pass through the original model object");
 	strictEqual(selections[0]?.selector, selector, "keyboard selection must preserve the selector callback payload");
-	let nativeModelSelection = false;
-	if (pickerProps && typeof modelPicker.handleNativeEvent === "function") {
-		modelPicker.handleNativeEvent({ type: "action", key: "", act: "use", mods: [] });
-		nativeModelSelection = true;
-		strictEqual(selections.length, 2, "the native select action must activate the selected real model row");
-		strictEqual(selections[1]?.selector, selector, "native selection must preserve the selector callback payload");
+	const nativeActivationAvailable = pickerProps !== undefined && typeof modelPicker.handleNativeEvent === "function";
+	if (nativeActivationAvailable) {
+		modelPicker.handleNativeEvent?.(composerPicker
+			? { type: "activate", key: "", item: selector, mods: [] }
+			: { type: "action", key: "", act: "use", mods: [] });
+		strictEqual(selections.length, 2, "native activation must select the real model row");
+		strictEqual(selections[1]?.model, model, "native activation must pass through the original model object");
+		strictEqual(selections[1]?.selector, selector, "native activation must preserve the selector callback payload");
 	}
 
 	const sessionFixture: SessionFixture = {
@@ -763,7 +763,8 @@ try {
 		mode,
 		families: ["model-picker", "thinking-selector", "settings-enum-options", "session-selector", "tree-selector", "oauth-selector", "session-account-selector"],
 		picker: {
-			title: modelPickerTitle,
+			nativeTitle: pickerProps?.title ?? null,
+			nativePlaceholder: pickerProps?.placeholder ?? null,
 			ansiTitle: ansiModelTitle,
 			status: statusExpected,
 			selector,
@@ -771,11 +772,12 @@ try {
 			searchQueryVisible: searchedPickerAnsi.includes("provider"),
 			ansiHasUserLabel: pickerAnsi.includes(model.name),
 			nativeAvailable: pickerProps !== undefined,
-			nativeActionAvailable: pickerProps !== undefined && typeof modelPicker.handleNativeEvent === "function",
-			nativeSelection: nativeModelSelection,
+			nativeActivationAvailable,
+			nativeSelection: selections[1]?.selector === selector,
 			nativeHasSelector: pickerProps !== undefined && pickerProps.selected === selector,
 			sourceSupported: modelPickerSupported,
 			selectionOnlyAvailable,
+			composerPicker,
 			hostileTemplateLiteral,
 		},
 		thinking: {

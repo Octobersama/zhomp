@@ -318,32 +318,36 @@ async function verifyInstalledMenuSurface(host: HostPackage, env: NodeJS.Process
 	assertion("picker" in surface && surface.picker !== null && typeof surface.picker === "object" && !Array.isArray(surface.picker), `menu ${mode} picker evidence is missing`);
 	const picker = surface.picker;
 	assertion(picker !== null && typeof picker === "object" && !Array.isArray(picker), `menu ${mode} picker evidence is malformed`);
-	assertion("title" in picker && typeof picker.title === "string" &&
+	assertion("nativeTitle" in picker && (picker.nativeTitle === null || typeof picker.nativeTitle === "string") &&
+		"nativePlaceholder" in picker && (picker.nativePlaceholder === null || typeof picker.nativePlaceholder === "string") &&
 		"ansiTitle" in picker && typeof picker.ansiTitle === "string" &&
 		"status" in picker && typeof picker.status === "string" &&
 		"selector" in picker && picker.selector === "provider/id" &&
 		"searchQueryVisible" in picker && picker.searchQueryVisible === true &&
 		"ansiHasUserLabel" in picker && picker.ansiHasUserLabel === true &&
 		"nativeAvailable" in picker && typeof picker.nativeAvailable === "boolean" &&
-		"nativeActionAvailable" in picker && typeof picker.nativeActionAvailable === "boolean" &&
+		"nativeActivationAvailable" in picker && typeof picker.nativeActivationAvailable === "boolean" &&
 		"nativeHasSelector" in picker && picker.nativeHasSelector === picker.nativeAvailable &&
 		"nativeSelection" in picker && typeof picker.nativeSelection === "boolean" &&
 		"sourceSupported" in picker && typeof picker.sourceSupported === "boolean" &&
-		"selectionOnlyAvailable" in picker && typeof picker.selectionOnlyAvailable === "boolean",
+		"selectionOnlyAvailable" in picker && typeof picker.selectionOnlyAvailable === "boolean" &&
+		"composerPicker" in picker && typeof picker.composerPicker === "boolean",
 		`menu ${mode} picker changed display data, keyboard search, or capability evidence`);
-	assertion(!picker.nativeActionAvailable || picker.nativeSelection === true, "available native model actions must preserve the selector payload");
+	assertion(!picker.nativeActivationAvailable || picker.nativeSelection === true, "available native model activation must preserve the selector payload");
 	const modelSupported = picker.sourceSupported === true;
 	const modelNativeAvailable = picker.nativeAvailable === true;
 	const selectionOnlyAvailable = picker.selectionOnlyAvailable === true;
 	const modelAnsiEnglish = selectionOnlyAvailable ? ["Select Model"] : ["Switch Model", "Switch Task Model"];
 	assertMenuTextMode(picker.ansiTitle, modelAnsiEnglish, mode, modelSupported, "ANSI model-picker title");
-	assertMenuTextMode(
-		picker.title,
-		modelNativeAvailable ? [selectionOnlyAvailable ? "Select model" : "Switch model"] : modelAnsiEnglish,
-		mode,
-		modelSupported,
-		"model-picker title",
-	);
+	if (modelNativeAvailable && picker.composerPicker) {
+		assertion(picker.nativeTitle === null && typeof picker.nativePlaceholder === "string", "composer picker must use search as its heading");
+		assertMenuTextMode(picker.nativePlaceholder, ["Search, @ for roles…"], mode, modelSupported, "native model-picker placeholder");
+	} else if (modelNativeAvailable) {
+		assertion(typeof picker.nativeTitle === "string", "legacy native picker title is missing");
+		assertMenuTextMode(picker.nativeTitle, [selectionOnlyAvailable ? "Select model" : "Switch model"], mode, modelSupported, "native model-picker title");
+	} else {
+		assertion(picker.nativeTitle === null && picker.nativePlaceholder === null, "ANSI picker must not report native chrome");
+	}
 	const sourceStatus = selectionOnlyAvailable
 		? "Selection only — does not change the session model"
 		: "Session-only switch — role models stay unchanged";
@@ -351,8 +355,8 @@ async function verifyInstalledMenuSurface(host: HostPackage, env: NodeJS.Process
 	assertion(modelChromeTranslated ? picker.status !== sourceStatus : picker.status === sourceStatus,
 		"model-picker status did not follow its source capability");
 	if (mode === "hostile") {
-		assertion("hostileTemplateLiteral" in picker && picker.hostileTemplateLiteral === (modelSupported && selectionOnlyAvailable),
-			"hostile template evidence did not match source and select-only capabilities");
+		assertion("hostileTemplateLiteral" in picker && picker.hostileTemplateLiteral === (modelSupported && (selectionOnlyAvailable || picker.composerPicker)),
+			"hostile template evidence did not match the installed picker shape");
 	}
 	assertion("thinking" in surface && surface.thinking !== null && typeof surface.thinking === "object" && !Array.isArray(surface.thinking), `menu ${mode} thinking selector evidence is missing`);
 	const thinking = surface.thinking;
@@ -541,7 +545,9 @@ async function verifyInstalledConsumers(host: HostPackage, env: NodeJS.ProcessEn
 		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-setup-surface.ts", "SetupWizard", mode));
 		outputs.push(await verifyInstalledInterfaceProbe(host, env, "integration-welcome-surface.ts", "WelcomeHints", mode));
 		for (const probe of probes) {
-			const unavailable = probe.modules.map(module => `${module.root}:${module.path}`).filter(path => !supportedPaths.has(path));
+			const unavailable = probe.modules
+				.filter(module => !(host.version.startsWith("18.") && module.path === "src/native/ask-card.ts"))
+				.map(module => `${module.root}:${module.path}`).filter(path => !supportedPaths.has(path));
 			if (unavailable.length > 0) {
 				// Git's actual terminal/keyboard fallback was already exercised by GitCLI above.
 				if (probe.legacyFile && probe.legacyComponent) {

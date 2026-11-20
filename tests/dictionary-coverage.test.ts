@@ -163,6 +163,7 @@ const preservedTechnicalText: Record<string, true> = {
 	"Garage": true,
 	"Gemini": true,
 	"Gemma": true,
+	"Ghidra": true,
 	"Git": true,
 	"GitHub": true,
 	"GitHub CLI": true,

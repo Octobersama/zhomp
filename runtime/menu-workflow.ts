@@ -57,6 +57,40 @@ const SELECTOR_PATCHES: readonly WorkflowMenuPatch[] = [
 		'\t\tconst confirmed = await this.ctx.showHookConfirm(\n\t\t\t__zhompMenuText("Delete Session"),\n\t\t\t`${__zhompMenuText("This will permanently delete the current session.")}\\n${__zhompMenuText("You will be returned to the session selector.")}`,\n\t\t);',
 		1,
 	),
+	patch('`Resumed session in ${shortenPath(newCwd)}`', '__zhompMenuText("Resumed session in {path}", { path: shortenPath(newCwd) })'),
+	patch('"Resumed session"', '__zhompMenuText("Resumed session")'),
+];
+
+const SELECTOR_VARIANTS: readonly (readonly WorkflowMenuPatch[])[] = [
+	[
+		patch(
+			'`Resumed session, moved here from removed worktree ${shortenPath(target.movedFrom)}`',
+			'__zhompMenuText("Resumed session, moved here from removed worktree {path}", { path: shortenPath(target.movedFrom) })',
+		),
+		patch(
+			'`Could not move the session out of removed worktree ${shortenPath(info.cwd)}: ${error instanceof Error ? error.message : String(error)}`',
+			'__zhompMenuText("Could not move the session out of removed worktree {path}: {error}", { path: shortenPath(info.cwd), error: error instanceof Error ? error.message : String(error) })',
+		),
+		patch(
+			'`Session directory ${shortenPath(recordedCwd)} is missing or cannot be entered; continuing in ${shortenPath(newCwd)}`',
+			'`Session directory ${shortenPath(recordedCwd)} is missing or cannot be entered; continuing in ${shortenPath(newCwd)}`',
+			0,
+		),
+	],
+	[
+		patch(
+			'`Resumed session, moved here from missing ${shortenPath(target.movedFrom)}`',
+			'__zhompMenuText("Resumed session, moved here from missing {path}", { path: shortenPath(target.movedFrom) })',
+		),
+		patch(
+			'`Could not move the session here from missing ${shortenPath(info.cwd)}: ${error instanceof Error ? error.message : String(error)}`',
+			'__zhompMenuText("Could not move the session here from missing {path}: {error}", { path: shortenPath(info.cwd), error: error instanceof Error ? error.message : String(error) })',
+		),
+		patch(
+			'`Session directory ${shortenPath(recordedCwd)} is missing or cannot be entered; continuing in ${shortenPath(newCwd)}`',
+			'__zhompMenuText("Session directory {directory} is missing or cannot be entered; continuing in {newDirectory}", { directory: shortenPath(recordedCwd), newDirectory: shortenPath(newCwd) })',
+		),
+	],
 ];
 
 const CONFIRMATION_VARIANTS: readonly (readonly WorkflowMenuPatch[])[] = [
@@ -81,7 +115,7 @@ export const WORKFLOW_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "agent", path: "src/modes/controllers/cleanse-command-controller.ts", patches: CLEANSE_PATCHES },
 	{ root: "agent", path: "src/modes/controllers/input-controller.ts", patches: INPUT_PATCHES },
 	{ root: "agent", path: "src/modes/controllers/extension-ui-controller.ts", patches: [], variants: CONFIRMATION_VARIANTS },
-	{ root: "agent", path: "src/modes/controllers/selector-controller.ts", patches: SELECTOR_PATCHES },
+	{ root: "agent", path: "src/modes/controllers/selector-controller.ts", patches: SELECTOR_PATCHES, variants: SELECTOR_VARIANTS },
 ];
 
 export const WORKFLOW_MENU_TEXT_KEYS: readonly string[] = [
@@ -114,4 +148,11 @@ export const WORKFLOW_MENU_TEXT_KEYS: readonly string[] = [
 	"You will be returned to the session selector.",
 	"Yes",
 	"No",
+	"Resumed session in {path}",
+	"Resumed session",
+	"Resumed session, moved here from removed worktree {path}",
+	"Resumed session, moved here from missing {path}",
+	"Could not move the session out of removed worktree {path}: {error}",
+	"Could not move the session here from missing {path}: {error}",
+	"Session directory {directory} is missing or cannot be entered; continuing in {newDirectory}",
 ];

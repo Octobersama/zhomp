@@ -10,6 +10,7 @@ import { EXTENSION_MENU_MODULES } from "./menu-extensions";
 import { SETUP_MENU_MODULES } from "./menu-setup";
 import { STARTUP_MENU_MODULES } from "./menu-startup";
 import { WELCOME_MENU_MODULES } from "./menu-welcome";
+import { PROCESS_MENU_MODULES } from "./menu-process";
 
 export interface MenuPatch {
 	before: string;
@@ -24,6 +25,30 @@ export interface MenuModule {
 	/** Required common patches plus exactly one fully matching source variant. */
 	variants?: readonly (readonly MenuPatch[])[];
 }
+
+const LEGACY_SESSION_RESUME_LABEL: MenuPatch = {
+	before: 'this.#actionLabel = options.actionLabel ?? "Resume";',
+	after: 'this.#actionLabel = options.actionLabel ?? __zhompMenuText("Resume");',
+};
+
+const SESSION_SELECTOR_BOUND_DELETE_PATCHES: readonly MenuPatch[] = [
+	{ before: 'if (keys.length > 0) hints.push({ keys, label: "delete" });', after: 'if (keys.length > 0) hints.push({ keys, label: __zhompMenuText("delete") });' },
+	{ before: 'pickerAction("delete", "Delete", bindingKeys("app.session.delete"))', after: 'pickerAction("delete", __zhompMenuText("Delete"), bindingKeys("app.session.delete"))' },
+	{ before: '${deleteKeys.length > 0 ? `${formatKeyHints(deleteKeys)} delete · ` : ""}', after: '${deleteKeys.length > 0 ? __zhompMenuText("{keys} delete ·", { keys: formatKeyHints(deleteKeys) }) : ""}' },
+	{ before: '${this.#onRename ? `${formatKeyHint("f2")} rename · ` : ""}', after: '${this.#onRename ? `${formatKeyHint("f2")} ${__zhompMenuText("rename")} · ` : ""}' },
+	{ before: '${pinKey ? `${formatKeyHint(pinKey)} ${pin.label} · ` : ""}', after: '${pinKey ? `${formatKeyHint(pinKey)} ${pin.label === "pin" ? __zhompMenuText("pin") : __zhompMenuText("unpin")} · ` : ""}' },
+	{ before: '${formatKeyHint("enter")} select', after: '${__zhompMenuText("{key} select", { key: formatKeyHint("enter") })}' },
+	{ before: '${formatKeyHint("tab")} ${scopeHint}', after: '${__zhompMenuText("{key} {scope}", { key: formatKeyHint("tab"), scope: scopeHint })}' },
+	{ before: '${cancel} cancel', after: '${__zhompMenuText("{key} cancel", { key: cancel })}' },
+	{ before: 'new OverlayPanel("Rename Session")', after: 'new OverlayPanel(__zhompMenuText("Rename Session"))' },
+	{ before: 'this.#showError("Failed to rename session.")', after: 'this.#showError(__zhompMenuText("Failed to rename session."))' },
+	{ before: 'label: "Rename session",', after: 'label: __zhompMenuText("Rename session"),' },
+	{ before: 'empty: "cancel",', after: 'empty: __zhompMenuText("cancel"),' },
+	{ before: 'pickerAction("rename", "Rename", "f2")', after: 'pickerAction("rename", __zhompMenuText("Rename"), "f2")' },
+	{ before: 'pickerAction("pin", pin.label === "pin" ? "Pin" : "Unpin", bindingKeys(pin.binding))', after: 'pickerAction("pin", pin.label === "pin" ? __zhompMenuText("Pin") : __zhompMenuText("Unpin"), bindingKeys(pin.binding))' },
+	{ before: '{ keys: ["f2"], label: "rename" }', after: '{ keys: ["f2"], label: __zhompMenuText("rename") }' },
+	{ before: 'actionHint(pin.binding, pin.label)', after: 'actionHint(pin.binding, pin.label === "pin" ? __zhompMenuText("pin") : __zhompMenuText("unpin"))' },
+];
 
 export const MENU_MODULES: readonly MenuModule[] = [
 	...CONTEXT_MENU_MODULES,
@@ -48,6 +73,7 @@ export const MENU_MODULES: readonly MenuModule[] = [
 	...SETUP_MENU_MODULES,
 	...STARTUP_MENU_MODULES,
 	...WELCOME_MENU_MODULES,
+	...PROCESS_MENU_MODULES,
 	{
 		root: "tui",
 		path: "src/overlays/settings-selector.ts",
@@ -99,29 +125,57 @@ export const MENU_MODULES: readonly MenuModule[] = [
 			{ before: 'const STATUS_HINT = "Session-only switch — role models stay unchanged";', after: 'const STATUS_HINT = __zhompMenuText("Session-only switch — role models stay unchanged");', count: 1 },
 			{ before: 'const QUICK_ROLE_STATUS_HINT = "Quick role switch — applies its model and thinking for this session";', after: 'const QUICK_ROLE_STATUS_HINT = __zhompMenuText("Quick role switch — applies its model and thinking for this session");', count: 1 },
 			{ before: 'const TASK_STATUS_HINT = "Task subagent switch — spawned task agents use this model (session-only)";', after: 'const TASK_STATUS_HINT = __zhompMenuText("Task subagent switch — spawned task agents use this model (session-only)");', count: 1 },
-			{ before: 'const SELECT_ONLY_STATUS_HINT = "Selection only — does not change the session model";', after: 'const SELECT_ONLY_STATUS_HINT = __zhompMenuText("Selection only — does not change the session model");', count: 1 },
 			{ before: 'const close = `${editorKey("tui.select.cancel")} close`;', after: 'const close = __zhompMenuText("{key} close", { key: editorKey("tui.select.cancel") });', count: 1 },
 			{ before: 'return `${upDown} roles · ${enter} apply role model · type to search · ${close}`;', after: 'return __zhompMenuText("{upDown} roles · {enter} apply role model · type to search · {close}", { upDown, enter, close });', count: 1 },
-			{ before: 'return `${upDown} models · ${enter} use for Task subagents · type to search · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} use for Task subagents · type to search · {close}", { upDown, enter, close });', count: 1 },
-			{ before: 'return `${upDown} models · ${enter} select model · type to search · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} select model · type to search · {close}", { upDown, enter, close });', count: 1 },
-			{ before: 'return `${upDown} models · ${enter} use for this session · type to search · @ quick roles · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} use for this session · type to search · @ quick roles · {close}", { upDown, enter, close });', count: 1 },
-			{ before: 'this.#taskMode ? "Switch Task Model" : selectionOnly ? "Select Model" : "Switch Model"', after: 'this.#taskMode ? __zhompMenuText("Switch Task Model") : selectionOnly ? __zhompMenuText("Select Model") : __zhompMenuText("Switch Model")', count: 1 },
-			{ before: 'title: mode === "task" ? "Switch task model" : mode === "selection" ? "Select model" : "Switch model",', after: 'title: mode === "task" ? __zhompMenuText("Switch task model") : mode === "selection" ? __zhompMenuText("Select model") : __zhompMenuText("Switch model"),', count: 1 },
 			{ before: 'noun: mode === "role" ? "roles" : "models",', after: 'noun: mode === "role" ? __zhompMenuText("roles") : __zhompMenuText("models"),', count: 1 },
-			{ before: 'mode === "task" || mode === "selection" ? "Search models…" : "Search models, @ for quick roles…",', after: 'mode === "task" || mode === "selection" ? __zhompMenuText("Search models…") : __zhompMenuText("Search models, @ for quick roles…"),', count: 1 },
 			{ before: 'empty: mode === "role" ? `No quick roles in the ${cycleKey} cycle` : "No models available",', after: 'empty: mode === "role" ? __zhompMenuText("No quick roles in the {cycle} cycle", { cycle: cycleKey }) : __zhompMenuText("No models available"),', count: 1 },
-			{ before: 'mode === "role"\n\t\t\t\t\t\t\t? "Apply role"\n\t\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t\t? "Use for Task subagents"\n\t\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t\t? "Select model"\n\t\t\t\t\t\t\t\t\t: "Use for session",', after: 'mode === "role"\n\t\t\t\t\t\t\t? __zhompMenuText("Apply role")\n\t\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t\t? __zhompMenuText("Use for Task subagents")\n\t\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t\t? __zhompMenuText("Select model")\n\t\t\t\t\t\t\t\t\t: __zhompMenuText("Use for session"),', count: 1 },
-			{ before: 'pickerAction("task", "Task model",', after: 'pickerAction("task", __zhompMenuText("Task model"),', count: 1 },
-			{ before: 'query.length > 0 ? { ...CLOSE_ACTION, label: "Clear search" } : CLOSE_ACTION,', after: 'query.length > 0 ? { ...CLOSE_ACTION, label: __zhompMenuText("Clear search") } : CLOSE_ACTION,', count: 1 },
 			{ before: 'actionHint(["tui.select.up", "tui.select.down"], mode === "role" ? "roles" : "models")', after: 'actionHint(["tui.select.up", "tui.select.down"], mode === "role" ? __zhompMenuText("roles") : __zhompMenuText("models"))', count: 1 },
-			{ before: '? "apply role model"\n\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t? "use for Task subagents"\n\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t? "select model"\n\t\t\t\t\t\t\t\t: "use for this session",', after: '? __zhompMenuText("apply role model")\n\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t? __zhompMenuText("use for Task subagents")\n\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t? __zhompMenuText("select model")\n\t\t\t\t\t\t\t\t: __zhompMenuText("use for this session"),', count: 1 },
 			{ before: '{ keys: [], label: "type to search" },', after: '{ keys: [], label: __zhompMenuText("type to search") },', count: 1 },
 			{ before: 'hints.push({ keys: ["@"], label: "quick roles" });', after: 'hints.push({ keys: ["@"], label: __zhompMenuText("quick roles") });', count: 1 },
 			{ before: 'hints.push(actionHint("tui.select.cancel", "close"));', after: 'hints.push(actionHint("tui.select.cancel", __zhompMenuText("close")));', count: 1 },
 			{ before: 'label: this.#taskMode ? "session model" : "task model"', after: 'label: this.#taskMode ? __zhompMenuText("session model") : __zhompMenuText("task model")', count: 1 },
 			{ before: 'footer += ` · ${formatKeyHint(this.#taskModeKey)} ${this.#taskMode ? "session model" : "task model"}`;', after: 'footer += ` · ${formatKeyHint(this.#taskModeKey)} ${__zhompMenuText(this.#taskMode ? "session model" : "task model")}`;', count: 1 },
-			{ before: 'head: mode === "task" ? "Switch Task Model" : mode === "selection" ? "Select Model" : "Switch Model",', after: 'head: mode === "task" ? __zhompMenuText("Switch Task Model") : mode === "selection" ? __zhompMenuText("Select Model") : __zhompMenuText("Switch Model"),', count: 1 },
-		]
+		],
+		variants: [
+			[
+				{ before: 'const SELECT_ONLY_STATUS_HINT = "Selection only — does not change the session model";', after: 'const SELECT_ONLY_STATUS_HINT = __zhompMenuText("Selection only — does not change the session model");', count: 1 },
+				{ before: 'return `${upDown} models · ${enter} use for Task subagents · type to search · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} use for Task subagents · type to search · {close}", { upDown, enter, close });', count: 1 },
+				{ before: 'return `${upDown} models · ${enter} select model · type to search · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} select model · type to search · {close}", { upDown, enter, close });', count: 1 },
+				{ before: 'return `${upDown} models · ${enter} use for this session · type to search · @ quick roles · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} use for this session · type to search · @ quick roles · {close}", { upDown, enter, close });', count: 1 },
+				{ before: 'this.#taskMode ? "Switch Task Model" : selectionOnly ? "Select Model" : "Switch Model"', after: 'this.#taskMode ? __zhompMenuText("Switch Task Model") : selectionOnly ? __zhompMenuText("Select Model") : __zhompMenuText("Switch Model")', count: 1 },
+				{ before: 'title: mode === "task" ? "Switch task model" : mode === "selection" ? "Select model" : "Switch model",', after: 'title: mode === "task" ? __zhompMenuText("Switch task model") : mode === "selection" ? __zhompMenuText("Select model") : __zhompMenuText("Switch model"),', count: 1 },
+				{ before: 'mode === "task" || mode === "selection" ? "Search models…" : "Search models, @ for quick roles…",', after: 'mode === "task" || mode === "selection" ? __zhompMenuText("Search models…") : __zhompMenuText("Search models, @ for quick roles…"),', count: 1 },
+				{ before: 'mode === "role"\n\t\t\t\t\t\t\t? "Apply role"\n\t\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t\t? "Use for Task subagents"\n\t\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t\t? "Select model"\n\t\t\t\t\t\t\t\t\t: "Use for session",', after: 'mode === "role"\n\t\t\t\t\t\t\t? __zhompMenuText("Apply role")\n\t\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t\t? __zhompMenuText("Use for Task subagents")\n\t\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t\t? __zhompMenuText("Select model")\n\t\t\t\t\t\t\t\t\t: __zhompMenuText("Use for session"),', count: 1 },
+				{ before: 'pickerAction("task", "Task model",', after: 'pickerAction("task", __zhompMenuText("Task model"),', count: 1 },
+				{ before: 'query.length > 0 ? { ...CLOSE_ACTION, label: "Clear search" } : CLOSE_ACTION,', after: 'query.length > 0 ? { ...CLOSE_ACTION, label: __zhompMenuText("Clear search") } : CLOSE_ACTION,', count: 1 },
+				{ before: '? "apply role model"\n\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t? "use for Task subagents"\n\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t? "select model"\n\t\t\t\t\t\t\t\t: "use for this session",', after: '? __zhompMenuText("apply role model")\n\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t? __zhompMenuText("use for Task subagents")\n\t\t\t\t\t\t\t: mode === "selection"\n\t\t\t\t\t\t\t\t? __zhompMenuText("select model")\n\t\t\t\t\t\t\t\t: __zhompMenuText("use for this session"),', count: 1 },
+				{ before: 'head: mode === "task" ? "Switch Task Model" : mode === "selection" ? "Select Model" : "Switch Model",', after: 'head: mode === "task" ? __zhompMenuText("Switch Task Model") : mode === "selection" ? __zhompMenuText("Select Model") : __zhompMenuText("Switch Model"),', count: 1 },
+			],
+			[
+				{ before: 'const provider = `${formatKeyHint("tab")} provider`;', after: 'const provider = __zhompMenuText("{key} provider", { key: formatKeyHint("tab") });', count: 1 },
+				{ before: 'const level = thinking ? ` · ${formatKeyHint("left")}/${formatKeyHint("right")} thinking` : "";', after: 'const level = thinking ? __zhompMenuText(" · {left}/{right} thinking", { left: formatKeyHint("left"), right: formatKeyHint("right") }) : "";', count: 1 },
+				{ before: 'return `${upDown} models · ${enter} use for Task subagents · ${provider} · type to search · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} use for Task subagents · {provider} · type to search · {close}", { upDown, enter, provider, close });', count: 1 },
+				{ before: 'return `${upDown} models · ${enter} use for this session · ${provider}${level} · type to search · @ quick roles · ${close}`;', after: 'return __zhompMenuText("{upDown} models · {enter} use for this session · {provider}{level} · type to search · @ quick roles · {close}", { upDown, enter, provider, level, close });', count: 1 },
+				{ before: 'out.push(topBorder(width, this.#taskMode ? "Switch Task Model" : "Switch Model", borderColor));', after: 'out.push(topBorder(width, this.#taskMode ? __zhompMenuText("Switch Task Model") : __zhompMenuText("Switch Model"), borderColor));', count: 1 },
+				{ before: 'title: "Switch model", subtitle: [span(this.#configError, "error")]', after: 'title: __zhompMenuText("Switch model"), subtitle: [span(this.#configError, "error")]', count: 1 },
+				{ before: 'placeholder: mode === "task" ? "Search Task models…" : "Search, @ for roles…",', after: 'placeholder: mode === "task" ? __zhompMenuText("Search Task models…") : __zhompMenuText("Search, @ for roles…"),', count: 1 },
+				{ before: 'pickerAction("task", "Task / Main",', after: 'pickerAction("task", __zhompMenuText("Task / Main"),', count: 1 },
+				{ before: '[AUTO_THINKING]: "Auto",', after: '[AUTO_THINKING]: __zhompMenuText("Auto"),', count: 1 },
+				{ before: '[ThinkingLevel.Off]: "Off",', after: '[ThinkingLevel.Off]: __zhompMenuText("Off"),', count: 1 },
+				{ before: '[ThinkingLevel.Minimal]: "Min",', after: '[ThinkingLevel.Minimal]: __zhompMenuText("Min"),', count: 1 },
+				{ before: '[ThinkingLevel.Low]: "Low",', after: '[ThinkingLevel.Low]: __zhompMenuText("Low"),', count: 1 },
+				{ before: '[ThinkingLevel.Medium]: "Med",', after: '[ThinkingLevel.Medium]: __zhompMenuText("Med"),', count: 1 },
+				{ before: '[ThinkingLevel.High]: "High",', after: '[ThinkingLevel.High]: __zhompMenuText("High"),', count: 1 },
+				{ before: '[ThinkingLevel.XHigh]: "XHigh",', after: '[ThinkingLevel.XHigh]: __zhompMenuText("XHigh"),', count: 1 },
+				{ before: '[ThinkingLevel.Max]: "Max",', after: '[ThinkingLevel.Max]: __zhompMenuText("Max"),', count: 1 },
+				{ before: 'disabled: model.reasoning ? `${model.name} picks its own effort` : `${model.name} does not reason`,', after: 'disabled: model.reasoning ? __zhompMenuText("{model} picks its own effort", { model: model.name }) : __zhompMenuText("{model} does not reason", { model: model.name }),', count: 1 },
+				{ before: 'theme.fg("dim", " · no thinking")', after: 'theme.fg("dim", __zhompMenuText(" · no thinking"))', count: 1 },
+				{ before: 'theme.fg("muted", " · thinking ")', after: 'theme.fg("muted", __zhompMenuText(" · thinking "))', count: 1 },
+				{ before: 'label: "Thinking",', after: 'label: __zhompMenuText("Thinking"),', count: 1 },
+				{ before: 'label:\n\t\t\t\t\tmode === "role"\n\t\t\t\t\t\t? "apply role model"\n\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t? "use for Task subagents"\n\t\t\t\t\t\t\t: "use for this session",', after: 'label:\n\t\t\t\t\tmode === "role"\n\t\t\t\t\t\t? __zhompMenuText("apply role model")\n\t\t\t\t\t\t: mode === "task"\n\t\t\t\t\t\t\t? __zhompMenuText("use for Task subagents")\n\t\t\t\t\t\t\t: __zhompMenuText("use for this session"),', count: 1 },
+				{ before: 'head: this.#taskMode ? "Switch Task Model" : "Switch Model",', after: 'head: this.#taskMode ? __zhompMenuText("Switch Task Model") : __zhompMenuText("Switch Model"),', count: 1 },
+			],
+		],
 	},
 	{
 		root: "tui",
@@ -151,7 +205,6 @@ export const MENU_MODULES: readonly MenuModule[] = [
 			{ before: '{ head: "Conversation" }', after: '{ head: __zhompMenuText("Conversation") }', count: 1 },
 			{ before: 'super(options.title ?? "Resume Session")', after: 'super(options.title ?? __zhompMenuText("Resume Session"))', count: 1 },
 			{ before: 'this.#title = options.title ?? "Resume Session";', after: 'this.#title = options.title ?? __zhompMenuText("Resume Session");', count: 1 },
-			{ before: 'this.#actionLabel = options.actionLabel ?? "Resume";', after: 'this.#actionLabel = options.actionLabel ?? __zhompMenuText("Resume");', count: 1 },
 			{ before: 'const scopeLabel = this.#scopeLabel ?? (this.#scope === "all" ? "all projects" : "current folder");', after: 'const scopeLabel = this.#scopeLabel ?? (this.#scope === "all" ? __zhompMenuText("all projects") : __zhompMenuText("current folder"));', count: 1 },
 			{ before: '"Loading all projects…"', after: '__zhompMenuText("Loading all projects…")', count: 2 },
 			{ before: '[span("No sessions found", "muted")]', after: '[span(__zhompMenuText("No sessions found"), "muted")]', count: 1 },
@@ -170,11 +223,13 @@ export const MENU_MODULES: readonly MenuModule[] = [
 		],
 		variants: [
 			[
+				LEGACY_SESSION_RESUME_LABEL,
 				{ before: '`[${this.#onDelete ? `${formatKeyHints(["delete", "backspace"])} delete · ` : ""}${formatKeyHint("enter")} select · ${formatKeyHint("tab")} ${scopeHint} · ${cancel} cancel]`', after: '`[${this.#onDelete ? __zhompMenuText("{keys} delete ·", { keys: formatKeyHints(["delete", "backspace"]) }) : ""}${__zhompMenuText("{key} select", { key: formatKeyHint("enter") })} · ${__zhompMenuText("{key} {scope}", { key: formatKeyHint("tab"), scope: scopeHint })} · ${__zhompMenuText("{key} cancel", { key: cancel })}]`' },
 				{ before: '{ keys: ["delete", "backspace"], label: "delete" }', after: '{ keys: ["delete", "backspace"], label: __zhompMenuText("delete") }' },
 				{ before: 'pickerAction("delete", "Delete", "backspace")', after: 'pickerAction("delete", __zhompMenuText("Delete"), "backspace")' },
 			],
 			[
+				LEGACY_SESSION_RESUME_LABEL,
 				{ before: '`[${this.#onDelete ? `${formatKeyHints(["delete", "backspace"])} delete · ` : ""}${this.#onRename ? `${formatKeyHint("f2")} rename · ` : ""}${pinKey ? `${formatKeyHint(pinKey)} ${pin.label} · ` : ""}${formatKeyHint("enter")} select · ${formatKeyHint("tab")} ${scopeHint} · ${cancel} cancel]`', after: '`[${this.#onDelete ? __zhompMenuText("{keys} delete ·", { keys: formatKeyHints(["delete", "backspace"]) }) : ""}${this.#onRename ? `${formatKeyHint("f2")} ${__zhompMenuText("rename")} · ` : ""}${pinKey ? `${formatKeyHint(pinKey)} ${pin.label === "pin" ? __zhompMenuText("pin") : __zhompMenuText("unpin")} · ` : ""}${__zhompMenuText("{key} select", { key: formatKeyHint("enter") })} · ${__zhompMenuText("{key} {scope}", { key: formatKeyHint("tab"), scope: scopeHint })} · ${__zhompMenuText("{key} cancel", { key: cancel })}]`' },
 				{ before: 'new OverlayPanel("Rename Session")', after: 'new OverlayPanel(__zhompMenuText("Rename Session"))' },
 				{ before: 'this.#showError("Failed to rename session.")', after: 'this.#showError(__zhompMenuText("Failed to rename session."))' },
@@ -186,22 +241,12 @@ export const MENU_MODULES: readonly MenuModule[] = [
 				{ before: 'pickerAction("delete", "Delete", "backspace")', after: 'pickerAction("delete", __zhompMenuText("Delete"), "backspace")' },
 			],
 			[
-				{ before: 'if (keys.length > 0) hints.push({ keys, label: "delete" });', after: 'if (keys.length > 0) hints.push({ keys, label: __zhompMenuText("delete") });' },
-				{ before: 'pickerAction("delete", "Delete", bindingKeys("app.session.delete"))', after: 'pickerAction("delete", __zhompMenuText("Delete"), bindingKeys("app.session.delete"))' },
-				{ before: '${deleteKeys.length > 0 ? `${formatKeyHints(deleteKeys)} delete · ` : ""}', after: '${deleteKeys.length > 0 ? __zhompMenuText("{keys} delete ·", { keys: formatKeyHints(deleteKeys) }) : ""}' },
-				{ before: '${this.#onRename ? `${formatKeyHint("f2")} rename · ` : ""}', after: '${this.#onRename ? `${formatKeyHint("f2")} ${__zhompMenuText("rename")} · ` : ""}' },
-				{ before: '${pinKey ? `${formatKeyHint(pinKey)} ${pin.label} · ` : ""}', after: '${pinKey ? `${formatKeyHint(pinKey)} ${pin.label === "pin" ? __zhompMenuText("pin") : __zhompMenuText("unpin")} · ` : ""}' },
-				{ before: '${formatKeyHint("enter")} select', after: '${__zhompMenuText("{key} select", { key: formatKeyHint("enter") })}' },
-				{ before: '${formatKeyHint("tab")} ${scopeHint}', after: '${__zhompMenuText("{key} {scope}", { key: formatKeyHint("tab"), scope: scopeHint })}' },
-				{ before: '${cancel} cancel', after: '${__zhompMenuText("{key} cancel", { key: cancel })}' },
-				{ before: 'new OverlayPanel("Rename Session")', after: 'new OverlayPanel(__zhompMenuText("Rename Session"))' },
-				{ before: 'this.#showError("Failed to rename session.")', after: 'this.#showError(__zhompMenuText("Failed to rename session."))' },
-				{ before: 'label: "Rename session",', after: 'label: __zhompMenuText("Rename session"),' },
-				{ before: 'empty: "cancel",', after: 'empty: __zhompMenuText("cancel"),' },
-				{ before: 'pickerAction("rename", "Rename", "f2")', after: 'pickerAction("rename", __zhompMenuText("Rename"), "f2")' },
-				{ before: 'pickerAction("pin", pin.label === "pin" ? "Pin" : "Unpin", bindingKeys(pin.binding))', after: 'pickerAction("pin", pin.label === "pin" ? __zhompMenuText("Pin") : __zhompMenuText("Unpin"), bindingKeys(pin.binding))' },
-				{ before: '{ keys: ["f2"], label: "rename" }', after: '{ keys: ["f2"], label: __zhompMenuText("rename") }' },
-				{ before: 'actionHint(pin.binding, pin.label)', after: 'actionHint(pin.binding, pin.label === "pin" ? __zhompMenuText("pin") : __zhompMenuText("unpin"))' },
+				LEGACY_SESSION_RESUME_LABEL,
+				...SESSION_SELECTOR_BOUND_DELETE_PATCHES,
+			],
+			[
+				{ before: 'pickerAction("resume", "Resume", "enter", { primary: true })', after: 'pickerAction("resume", __zhompMenuText("Resume"), "enter", { primary: true })' },
+				...SESSION_SELECTOR_BOUND_DELETE_PATCHES,
 			],
 		]
 	},

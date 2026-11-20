@@ -15,7 +15,9 @@ function patch(before: string, after: string, count: number): DialogMenuPatch {
 	return { before, after, count };
 }
 
-const ASK_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
+/** 18.x and 19.x Ask sources need complete, mutually exclusive patch sets. */
+const ASK_DIALOG_PATCHES: readonly DialogMenuPatch[] = [];
+const ASK_DIALOG_LEGACY_PATCHES: readonly DialogMenuPatch[] = [
 	patch('this.#panel = new OverlayPanel("Ask");', 'this.#panel = new OverlayPanel(' + text("Ask") + ');', 1),
 	patch('\treturn disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);\n}',
 		'\tconst logicalLabels = disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);\n\tconst localizedLabels = logicalLabels.map((label, index) => localizedRecommendedLabel(question, index, label));\n\treturn disambiguateDisplayLabels(localizedLabels, [' + text("Other…") + ', ...GUEST_ACTION_LABELS]);\n}\n\nfunction localizedRecommendedLabel(question: ExtensionAskDialogQuestion, index: number, label: string): string {\n\tconst option = question.options[index];\n\tif (!option || question.recommended !== index) return label;\n\tconst base = sanitizeCarriageReturns(option.label);\n\tconst badgeStart = base.length;\n\tif (base.endsWith(RECOMMENDED_SUFFIX) || label.slice(badgeStart, badgeStart + RECOMMENDED_SUFFIX.length) !== RECOMMENDED_SUFFIX) return label;\n\tconst suffix = __zhompMenuText(" (Recommended)");\n\treturn `${label.slice(0, badgeStart)}${suffix}${label.slice(badgeStart + RECOMMENDED_SUFFIX.length)}`;\n}', 1),
@@ -75,7 +77,7 @@ const ASK_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
 	patch('{ title: `Note for ${rowItem.label}`, question: question.question },', '{ title: ' + text("Note for {option}", "{ option: rowItem.label }") + ', question: question.question },', 1),
 ];
 
-const ASK_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+const ASK_DIALOG_NOTE_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
 	[
 		patch('const note = actionButton("Note", "note", { keys: "n", title: "Add a note to the highlighted answer  n" });',
 			'const note = actionButton(' + text("Note") + ', "note", { keys: "n", title: ' + text("Add a note to the highlighted answer  n") + ' });', 1),
@@ -89,8 +91,64 @@ const ASK_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
 			'const note = actionButton(' + text("Note") + ', "note", {\n\t\t\tkeys: "n",\n\t\t\ttitle: ' + text("Add a note to the highlighted answer  n") + ',\n\t\t});', 1),
 	],
 ];
+const ASK_DIALOG_CURRENT_PATCHES: readonly DialogMenuPatch[] = [
+	patch('this.#panel = new OverlayPanel("Ask");', 'this.#panel = new OverlayPanel(' + text("Ask") + ');', 1),
+	patch('\treturn disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);\n}',
+		'\tconst logicalLabels = disambiguateDisplayLabels(badged, [OTHER_OPTION, ...GUEST_ACTION_LABELS]);\n\tconst localizedLabels = logicalLabels.map((label, index) => localizedRecommendedLabel(question, index, label));\n\treturn disambiguateDisplayLabels(localizedLabels, [' + text("Other…") + ', ...GUEST_ACTION_LABELS]);\n}\n\nfunction localizedRecommendedLabel(question: ExtensionAskDialogQuestion, index: number, label: string): string {\n\tconst option = question.options[index];\n\tif (!option || question.recommended !== index) return label;\n\tconst base = sanitizeCarriageReturns(option.label);\n\tconst badgeStart = base.length;\n\tif (base.endsWith(RECOMMENDED_SUFFIX) || label.slice(badgeStart, badgeStart + RECOMMENDED_SUFFIX.length) !== RECOMMENDED_SUFFIX) return label;\n\tconst suffix = __zhompMenuText(" (Recommended)");\n\treturn `${label.slice(0, badgeStart)}${suffix}${label.slice(badgeStart + RECOMMENDED_SUFFIX.length)}`;\n}', 1),
+	patch('function optionLabelSpans(question: ExtensionAskDialogQuestion, optionIndex: number, label: string): TspSpan[] {\n\tconst recommended = question.recommended === optionIndex && label.endsWith(RECOMMENDED_SUFFIX);\n\treturn inlineCodeSpans(recommended ? label.slice(0, -RECOMMENDED_SUFFIX.length) : label);\n}',
+		'function optionLabelSpans(question: ExtensionAskDialogQuestion, optionIndex: number, label: string): TspSpan[] {\n\tif (question.recommended !== optionIndex) return inlineCodeSpans(label);\n\tconst option = question.options[optionIndex];\n\tconst base = option ? sanitizeCarriageReturns(option.label) : "";\n\tif (base.endsWith(RECOMMENDED_SUFFIX) && label.startsWith(base)) {\n\t\treturn inlineCodeSpans(label.slice(0, base.length - RECOMMENDED_SUFFIX.length) + label.slice(base.length));\n\t}\n\tconst suffix = __zhompMenuText(" (Recommended)");\n\treturn label.slice(base.length, base.length + suffix.length) === suffix\n\t\t? inlineCodeSpans(label.slice(0, base.length) + label.slice(base.length + suffix.length))\n\t\t: inlineCodeSpans(label);\n}', 1),
+	patch('const label = renderInlineMarkdown(rowItem.label, mdTheme, t => theme.fg(color, t));',
+		'const displayLabel = isOther ? ' + text("Other…") + ' : isOption ? localizedRecommendedLabel(question, rowItem.optionIndex ?? -1, rowItem.label) : rowItem.label;\n\tconst label = renderInlineMarkdown(displayLabel, mdTheme, t => theme.fg(color, t));', 1),
+	patch('theme.fg("success", "  ✎ note")', 'theme.fg("success", `  ✎ ${' + text("note") + '}`)', 1),
+	patch('? [span(OTHER_LABEL)]', '? [span(' + text("Other…") + ')]', 1),
+	patch('span("Type your own answer")', 'span(' + text("Type your own answer") + ')', 1),
+	patch('...(recommended ? { value: [span("Recommended")] } : {})', '...(recommended ? { value: [span(' + text("Recommended") + ')] } : {})', 1),
+	patch('const custom = state.customInput === undefined ? undefined : `Other: “${normalizedInlineInput(state.customInput)}”`;',
+		'const custom = state.customInput === undefined ? undefined : ' + text('Other: “{answer}”', '{ answer: normalizedInlineInput(state.customInput) }') + ';', 1),
+	patch('title: "Answers the recommended option when the time runs out",', 'title: ' + text("Answers the recommended option when the time runs out") + ',', 1),
+	patch('return this.#remainingSeconds === undefined ? "Ask" : `Ask (${this.#remainingSeconds}s)`;', 'return this.#remainingSeconds === undefined ? ' + text("Ask") + ' : ' + text("Ask ({seconds}s)", "{ seconds: this.#remainingSeconds }") + ';', 1),
+	patch('return `${this.#titleText()} · ${answered} of ${total} answered`;',
+		'return `${this.#titleText()} · ${' + text("{answered} of {total} answered", "{ answered, total }") + '}`;', 1),
+	patch('...(total > 1 ? { progress: `${answered} of ${total} answered` } : {}),',
+		'...(total > 1 ? { progress: ' + text("{answered} of {total} answered", "{ answered, total }") + ' } : {}),', 1),
+	patch('const composer = `${editorKey("tui.select.cancel")} composer`;',
+		'const composer = `${editorKey("tui.select.cancel")} ' + templateText("composer") + '`;', 1),
+	patch('const enterAction = index + 1 < this.#questions.length ? "next" : "submit";',
+		'const enterAction = index + 1 < this.#questions.length ? ' + text("next") + ' : ' + text("submit") + ';', 1),
+	patch('`${formatKeyHint("space")} toggle · ${enter} ${enterAction}`',
+		'`${formatKeyHint("space")} ' + templateText("toggle") + ' · ${enter} ${enterAction}`', 1),
+	patch('`${enter} select · ${formatKeyHint("n")} note`',
+		'`${enter} ' + templateText("select") + ' · ${formatKeyHint("n")} ' + templateText("note") + '`', 1),
+	patch('`${upDown} move`', '`${upDown} ' + templateText("move") + '`', 1),
+	patch('if (this.#questions.length > 1) hints.push(`${formatKeyHints(["tab", "left", "right"])} question`);',
+		'if (this.#questions.length > 1) hints.push(`${formatKeyHints(["tab", "left", "right"])} ' + templateText("question") + '`);', 1),
+	patch('if (this.#questionCanPage) hints.push(`${editorKeys("tui.select.pageUp", "tui.select.pageDown")} page`);',
+		'if (this.#questionCanPage) hints.push(`${editorKeys("tui.select.pageUp", "tui.select.pageDown")} ' + templateText("page") + '`);', 1),
+	patch('hints.push(`${expandKeyHint()} ${this.#expanded ? "collapse" : "expand"}`);',
+		'hints.push(`${expandKeyHint()} ${this.#expanded ? ' + text("collapse") + ' : ' + text("expand") + '}`);', 1),
+	patch('if (hideKey) hints.push(`${hideKey} hide`);', 'if (hideKey) hints.push(`${hideKey} ' + templateText("hide") + '`);', 1),
+	patch('const hints = [`${show} show`, `${editorKey("tui.select.cancel")} composer`];',
+		'const hints = [`${show} ' + templateText("show") + '`, `${editorKey("tui.select.cancel")} ' + templateText("composer") + '`];', 1),
+	patch('const label = theme.fg("accent", `${this.#titleText()} hidden:`);', 'const label = theme.fg("accent", `${this.#titleText()} ' + templateText("hidden:") + '`);', 1),
+	patch('theme.fg("dim", ` (+${this.#questions.length - 1} more)`) : "";', 'theme.fg("dim", ` (+' + templateText("{count} more", "{ count: this.#questions.length - 1 }") + ')`) : "";', 1),
+	patch('const result = await this.#openPrompt({ title: "Custom answer", question: question.question }, prefill);', 'const result = await this.#openPrompt({ title: ' + text("Custom answer") + ', question: question.question }, prefill);', 1),
+	patch('{ title: `Note for ${rowItem.label}`, question: question.question },', '{ title: ' + text("Note for {option}", "{ option: rowItem.label }") + ', question: question.question },', 1),
+	patch('const cancel = actionButton("Cancel", "cancel", { title: "Cancel without answering" });',
+		'const cancel = actionButton(' + text("Cancel") + ', "cancel", { title: ' + text("Cancel without answering") + ' });', 1),
+	patch('const submit = actionButton("Submit", "submit", { tone: "accent", title: "Submit the answers" });',
+		'const submit = actionButton(' + text("Submit") + ', "submit", { tone: "accent", title: ' + text("Submit the answers") + ' });', 1),
+];
 
-const FORM_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
+const ASK_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+	[...ASK_DIALOG_LEGACY_PATCHES, ...ASK_DIALOG_NOTE_VARIANTS[0]!],
+	[...ASK_DIALOG_LEGACY_PATCHES, ...ASK_DIALOG_NOTE_VARIANTS[1]!],
+	[...ASK_DIALOG_LEGACY_PATCHES, ...ASK_DIALOG_NOTE_VARIANTS[2]!],
+	[...ASK_DIALOG_CURRENT_PATCHES, ...ASK_DIALOG_NOTE_VARIANTS[2]!],
+];
+
+/** The 18.x paged form and 19.x scrolling form likewise use separate full variants. */
+const FORM_DIALOG_PATCHES: readonly DialogMenuPatch[] = [];
+const FORM_DIALOG_LEGACY_PATCHES: readonly DialogMenuPatch[] = [
 	patch('const DEFAULT_TITLE = "Ask";', 'const DEFAULT_TITLE = ' + text("Ask") + ';', 1),
 	patch('const SUBMIT_LABEL = "Submit";', 'const SUBMIT_LABEL = ' + text("Submit") + ';', 1),
 	patch('const OTHER_PLACEHOLDER = "type your own";', 'const OTHER_PLACEHOLDER = ' + text("type your own") + ';', 1),
@@ -149,7 +207,7 @@ const FORM_DIALOG_PATCHES: readonly DialogMenuPatch[] = [
 	patch('actionButton("Show", "show", { tone: "accent", ...(hideKey ? { keys: hideKey } : {}) })',
 		'actionButton(' + text("Show") + ', "show", { tone: "accent", ...(hideKey ? { keys: hideKey } : {}) })', 1),
 ];
-const FORM_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+const FORM_DIALOG_LABEL_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
 	[
 		patch('const label = title || sanitize(questions.get(fields[0]!) ?? "") || `Question ${tabs.length + 1}`;',
 			'const label = title || sanitize(questions.get(fields[0]!) ?? "") || ' + text("Question {count}", "{ count: tabs.length + 1 }") + ';', 1),
@@ -158,6 +216,78 @@ const FORM_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
 		patch('const label = title || sanitize(question) || `Question ${tabs.length + 1}`;',
 			'const label = title || sanitize(question) || ' + text("Question {count}", "{ count: tabs.length + 1 }") + ';', 1),
 	],
+];
+const FORM_DIALOG_SHARED_DISPLAY_PATCHES: readonly DialogMenuPatch[] = [
+	patch('`${title} (${this.#remaining}s)`', '`${title}${' + text(" ({seconds}s)", "{ seconds: this.#remaining }") + '}`', 1),
+	patch('const label = theme.fg(focused ? "accent" : chosen ? "toolOutput" : "text", `${OTHER_LABEL}: `);',
+		'const label = theme.fg(focused ? "accent" : chosen ? "toolOutput" : "text", `${' + text("Other: ") + '}`);', 1),
+	patch('"  ✎ note"', '"  ✎ " + ' + text("note"), 1),
+	patch('"  ✎ draft"', '"  ✎ " + ' + text("draft"), 1),
+	patch('"  ✎ draft · "', '"  ✎ " + ' + text("draft") + ' + " · "', 1),
+	patch('label: typed ? [span(`${OTHER_LABEL}: `, "muted"), span(typed)] : [span(`${OTHER_LABEL}…`)],',
+		'label: typed ? [span(' + text("Other: ") + ', "muted"), span(typed)] : [span(' + text("Other…") + ')],', 1),
+];
+
+const FORM_DIALOG_CURRENT_PATCHES: readonly DialogMenuPatch[] = [
+	patch('const DEFAULT_TITLE = "Ask";', 'const DEFAULT_TITLE = ' + text("Ask") + ';', 1),
+	patch('const SUBMIT_LABEL = "Submit";', 'const SUBMIT_LABEL = ' + text("Submit") + ';', 1),
+	patch('const OTHER_PLACEHOLDER = "type your own";', 'const OTHER_PLACEHOLDER = ' + text("type your own") + ';', 1),
+	patch('const WELL_PLACEHOLDER = "type your answer";', 'const WELL_PLACEHOLDER = ' + text("type your answer") + ';', 1),
+	patch('return more > 0 ? `${question} (+${more} more)` : question;',
+		'return more > 0 ? ' + text("{question} (+{count} more)", "{ question, count: more }") + ' : question;', 1),
+	patch('if (slot.state === "failed") return `▣ ${name} — couldn\'t load: ${sanitize(slot.reason)}`;',
+		'if (slot.state === "failed") return ' + text("▣ {name} — couldn\'t load: {reason}", "{ name, reason: sanitize(slot.reason) }") + ';', 1),
+	patch('return `▣ ${name} — loading…`;', 'return ' + text("▣ {name} — loading…", "{ name }") + ';', 1),
+	patch('const unsent = this.#checked.get(active.field)!.has(active.option) ? "" : " · sent only if chosen";',
+		'const unsent = this.#checked.get(active.field)!.has(active.option) ? "" : ' + text(" · sent only if chosen") + ';', 1),
+	patch('return `enter save · blank removes · esc keep${unsent}`;',
+		'return `enter ' + templateText("save") + ' · ' + templateText("blank removes") + ' · esc ' + templateText("keep") + '${unsent}`;', 1),
+	patch('`Note for ${optionText(active.field.options[active.option]!)} · ${this.#noteEditHint()}`',
+		text("Note for {option}", "{ option: optionText(active.field.options[active.option]!) }") + ' + " · " + this.#noteEditHint()', 1),
+	patch('const composer = `${editorKey("tui.select.cancel")} composer${hideKey ? ` · ${hideKey} hide` : ""}`;',
+		'const composer = `${editorKey("tui.select.cancel")} ' + templateText("composer") + '${hideKey ? ` · ${hideKey} ' + templateText("hide") + '` : ""}`;', 1),
+	patch('const hints = [`${show} show`, `${editorKey("tui.select.cancel")} composer`];',
+		'const hints = [`${show} ' + templateText("show") + '`, `${editorKey("tui.select.cancel")} ' + templateText("composer") + '`];', 1),
+	patch('const label = theme.fg("accent", `${this.#titleText()} hidden:`);',
+		'const label = theme.fg("accent", `${this.#titleText()} ' + templateText("hidden:") + '`);', 1),
+	patch('return `${upDown} highlight · ${enter} choose${noteHint} · ${editorKey("tui.select.cancel")} close`;',
+		'return ' + text("{keys} highlight · {enter} choose{note} · {cancel} close", '{ keys: upDown, enter, note: noteHint, cancel: editorKey("tui.select.cancel") }') + ';', 1),
+	patch('if (stop.kind === "submit") action = `${enter} submit`;', 'if (stop.kind === "submit") action = `${enter} ${' + text("submit") + '}`;', 1),
+	patch('else if (stop.kind === "text") action = `${enter} next`;', 'else if (stop.kind === "text") action = `${enter} ${' + text("next") + '}`;', 1),
+	patch('else if (stop.kind === "other") action = `type your own · ${enter} next`;',
+		'else if (stop.kind === "other") action = `${' + text("type your own") + '} · ${enter} ${' + text("next") + '}`;', 1),
+	patch('`${formatKeyHint("space")} open · ${formatKeyHint("left")}/${formatKeyHint("right")} change · ${enter} next`',
+		text("{space} open · {left}/{right} change · {enter} next", '{ space: formatKeyHint("space"), left: formatKeyHint("left"), right: formatKeyHint("right"), enter }'), 1),
+	patch('`${formatKeyHint("space")} toggle · ${enter} next`',
+		text("{space} toggle · {enter} next", '{ space: formatKeyHint("space"), enter }'), 1),
+	patch('`${enter} choose`', '`${enter} ${' + text("choose") + '}`', 1),
+	patch('const hints = [action, `${upDown} move`];',
+		'const hints = [action, ' + text("{keys} move", "{ keys: upDown }") + '];', 1),
+	patch('if (stop.kind !== "submit") hints.push(`${formatKeyHint("tab")} next field`);',
+		'if (stop.kind !== "submit") hints.push(' + text("{key} next field", '{ key: formatKeyHint("tab") }') + ');', 1),
+	patch('hints.push(`${keys} question`);', 'hints.push(`${keys} ' + templateText("question") + '`);', 1),
+	patch('const pending = this.#errors.size > 0 ? theme.fg("error", `  ${this.#errors.size} to fix`) : "";',
+		'const pending = this.#errors.size > 0 ? theme.fg("error", `  ${' + text("{count} to fix", "{ count: this.#errors.size }") + '}`) : "";', 1),
+	patch('return `${named.filter(field => this.#answered(field)).length} of ${named.length} answered`;',
+		'return ' + text("{answered} of {total} answered", "{ answered: named.filter(field => this.#answered(field)).length, total: named.length }") + ';', 1),
+	patch('actionButton("Keep", "cancel", { keys: "escape" })', 'actionButton(' + text("Keep") + ', "cancel", { keys: "escape" })', 1),
+	patch('actionButton("Save", "save-note", { keys: "enter" })', 'actionButton(' + text("Save") + ', "save-note", { keys: "enter" })', 1),
+	patch('actionButton("Cancel", "cancel"),', 'actionButton(' + text("Cancel") + ', "cancel"),', 1),
+	patch('"Note",', text("Note") + ',', 1),
+	patch('title: `Add a note to the highlighted answer  ${formatKeyHint(noteKey)}`',
+		'title: ' + text("Add a note to the highlighted answer  {key}", '{ key: formatKeyHint(noteKey) }'), 1),
+	patch('title: "Add a note to the highlighted answer"', 'title: ' + text("Add a note to the highlighted answer"), 1),
+	patch('text(`Note for ${optionText(field.options[this.#noteEditor.option]!)}`, {',
+		'text(' + text("Note for {option}", "{ option: optionText(field.options[this.#noteEditor.option]!) }") + ', {', 1),
+	patch('pills.push({ label: `${OTHER_LABEL}: ${typed}`, chosen: true, act: `${OPEN_ACT}${index}` });',
+	'pills.push({ label: `${' + text("Other: ") + '}${typed}`, chosen: true, act: `${OPEN_ACT}${index}` });', 1),
+	patch('`Submits these answers in ${this.#remaining}s`', text("Submits these answers in {seconds}s", "{ seconds: this.#remaining }"), 1),
+];
+
+const FORM_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+	[...FORM_DIALOG_LEGACY_PATCHES, ...FORM_DIALOG_LABEL_VARIANTS[0]!, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
+	[...FORM_DIALOG_LEGACY_PATCHES, ...FORM_DIALOG_LABEL_VARIANTS[1]!, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
+	[...FORM_DIALOG_CURRENT_PATCHES, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
 ];
 
 const FORM_DATA_PATCHES: readonly DialogMenuPatch[] = [
@@ -235,8 +365,15 @@ const HOOK_SELECTOR_PATCHES: readonly DialogMenuPatch[] = [
 	patch('const label = plainInline(option.label, mdTheme);', 'const label = plainInline(option.displayLabel ?? option.label, mdTheme);', 1),
 ];
 
+const ASK_CARD_PATCHES: readonly DialogMenuPatch[] = [
+	patch('span("ask", "accent")', 'span(' + text("Ask") + ', "accent")', 1),
+	patch('title: "Answer this question",', 'title: ' + text("Answer this question") + ',', 1),
+	patch('title: "Show every option",', 'title: ' + text("Show every option") + ',', 1),
+];
+
 export const DIALOG_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/overlays/ask-dialog.ts", patches: ASK_DIALOG_PATCHES, variants: ASK_DIALOG_VARIANTS },
+	{ root: "tui", path: "src/native/ask-card.ts", patches: ASK_CARD_PATCHES },
 	{ root: "tui", path: "src/html-form/dialog.ts", patches: FORM_DIALOG_PATCHES, variants: FORM_DIALOG_VARIANTS },
 	{ root: "tui", path: "src/html-form/data.ts", patches: FORM_DATA_PATCHES },
 	{ root: "tui", path: "src/overlays/approval-dialog.ts", patches: APPROVAL_DIALOG_PATCHES },
@@ -269,4 +406,7 @@ export const DIALOG_MENU_TEXT_KEYS: readonly string[] = [
 	"Add a note to the highlighted answer  {key}", "Add a note to the highlighted answer", "Keep", "Save", "Cancel",
 	"Required", "Select at least one", "Enter a number", "Must be at least {value}", "Must be at most {value}",
 	"Needs at least {count} characters", "At most {count} characters", "Enter an email address", "Enter a full URL", "Must match {pattern}",
+	"composer", "draft", "page", "type your answer", "Cancel without answering", "Submit the answers",
+	"Answer this question", "Show every option", "{answered} of {total} answered", " ({seconds}s)",
+	"Other: ",
 ];

@@ -879,7 +879,47 @@ try {
 				ok(encodedRolePicker.includes(translatedLabel), `the native Roles picker must translate ${label}`);
 			}
 		}
+
+
 	}
+	const roleFallbackModels = [model, buildDisplayModel("Models", "Other", "Other")];
+	const roleFallbackSettings: ModelHubSettings = {
+		...settings,
+		getRoleInfo(role) {
+			const info = settings.getRoleInfo(role);
+			return role === "smol" ? { ...info, accepts: candidate => candidate.id === model.id } : info;
+		},
+	};
+	const roleFallbackRegistry = createProviderRegistry({ ...counters }, {
+		providers: ["Models"],
+		authenticatedProviders: ["Models"],
+		availableModels: roleFallbackModels,
+		catalogModels: roleFallbackModels,
+	});
+	const roleFallbackHub = new modelHubModule.ModelHubComponent(
+		fakeTui,
+		roleFallbackSettings,
+		roleFallbackRegistry,
+		[],
+		callbacks,
+		{ currentSelector: "Models/Roles" },
+	);
+	fixtureHubs.push(roleFallbackHub);
+	roleFallbackHub.handleInput("\x1b[A");
+	roleFallbackHub.handleInput("\r");
+	roleFallbackHub.handleInput("\x1b[B");
+	roleFallbackHub.handleInput("f");
+	const roleFallbackAnsi = Bun.stripANSI(roleFallbackHub.render(160).join("\n"));
+	const roleFallbackFiltersByRole = Bun.semver.satisfies(launch.host.version, ">=19.0.0");
+	ok(roleFallbackAnsi.includes("Models/Roles"), "role-keyed fallback selection must preserve the model selector");
+	strictEqual(
+		roleFallbackAnsi.includes("Models/Other"),
+		!roleFallbackFiltersByRole,
+		"19.x role-keyed fallback selection must filter models rejected by the role, while 18.x keeps its existing behavior",
+	);
+	roleFallbackHub.dispose();
+	fixtureHubs.pop();
+
 	for (const key of Object.keys(customRoles)) {
 		deepStrictEqual(roleInfoById[key], customRoleSnapshot[key], `custom role metadata ${key} must remain unchanged`);
 	}
