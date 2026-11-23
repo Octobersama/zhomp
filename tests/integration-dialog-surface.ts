@@ -13,8 +13,18 @@ interface InstalledExtensionApi {
 	preparePreloadDisplayTranslations(config: LaunchConfig, configPath: string): Promise<void>;
 }
 
+interface KeybindingManager {
+	getKeys(keybinding: string): readonly string[];
+}
+
+interface KeybindingRegistryApi {
+	getKeybindings(): KeybindingManager;
+	setKeybindings(manager: KeybindingManager): void;
+}
+
 interface AppKeybindingsApi {
 	formatKeyHint(key: string): string;
+	KeybindingsManager: { inMemory(): KeybindingManager };
 }
 
 interface NativeContext {
@@ -709,6 +719,115 @@ if (currentScrollingAsk) {
 		"Current HTML Ask form changed submitted form fields or hidden values", foldedFormText);
 	expectValue(formNotes, [], "Current HTML Ask form changed submitted notes", foldedFormText);
 	form.dispose();
+	const singleFieldFormsSubmit = readFileSync(formDialogPath, "utf8").includes('const next = this.#sole ? "submit" : "next";');
+	if (singleFieldFormsSubmit) {
+		const keybindingRegistryPath = Bun.resolveSync("@oh-my-pi/pi-tui/keybindings", launch.host.packageDir);
+		// Use HtmlFormDialog's launch-selected registry, not a separate workspace module instance.
+		const keybindingRegistry = await import(pathToFileURL(keybindingRegistryPath).href) as KeybindingRegistryApi;
+		const noteBindings = keybindings.KeybindingsManager.inMemory();
+		const [noteKey] = noteBindings.getKeys("app.ask.note");
+		if (!noteKey) throw new Error("In-memory app bindings must expose a form note key");
+		const fieldCases = [
+			{ kind: "text", html: '<label>Submit<input name="Settings" value="Other…" placeholder="high"></label>', value: "Other…" },
+			{ kind: "textarea", html: '<label>Submit<textarea name="Settings" placeholder="high">Other…</textarea></label>', value: "Other…" },
+			{ kind: "radio", html: '<label><input type="radio" name="Settings" value="id">Submit</label><label><input type="radio" name="Settings" value="high" checked>Settings</label>', value: "high" },
+			{ kind: "checkbox", html: '<label><input type="checkbox" name="Settings" value="Other…">Submit</label>', value: "Other…" },
+			{ kind: "select", html: '<label>Submit<select name="Settings"><option value="id">Settings</option><option value="Other…">high</option></select></label>', value: "Other…" },
+			{ kind: "other", html: '<label><input type="radio" name="Settings" value="id">Submit</label><label><input type="radio" name="Settings" value="high">Settings</label>', value: "Other…" },
+		] as const;
+		for (const fieldCase of fieldCases) {
+			for (const singleField of [true, false]) {
+				const context = `${fieldCase.kind} ${singleField ? "single-field" : "multi-field"} form`;
+				const trailingField = singleField ? "" : '<label>Settings<input name="extra" value="id"></label>';
+				const parsed = formParser.parseHtmlForm(`<form><input type="hidden" name="token" value="Settings">${fieldCase.html}${trailingField}</form>`);
+				let submitted: Record<string, unknown> | undefined;
+				let notes: readonly unknown[] | undefined;
+				let submissions = 0;
+				let cancelled = false;
+				const sample = new formDialogApi.HtmlFormDialog(parsed, {
+					onSubmit(data, capturedNotes) { submitted = data; notes = capturedNotes; submissions++; },
+					onCancel() { cancelled = true; },
+				});
+				if (fieldCase.kind === "other") {
+					if (!sample.handleNativeEvent) throw new Error(`${context} lost its native Other action`);
+					sample.handleNativeEvent({ type: "select", key: "f0", item: "other" });
+					for (const character of "Other…") sample.handleInput(character);
+				}
+				const hints = Bun.stripANSI(sample.keyHints?.() ?? "");
+				const next = expectedText(singleField ? "submit" : "next");
+				let action: string;
+				switch (fieldCase.kind) {
+					case "other":
+						action = `${expectedText("type your own")} · ${enterHint} ${next}`;
+						break;
+					case "select":
+						action = expectedText("{space} open · {left}/{right} change · {enter} {next}", {
+							space: keybindings.formatKeyHint("space"), left: keybindings.formatKeyHint("left"),
+							right: keybindings.formatKeyHint("right"), enter: enterHint, next,
+						});
+						break;
+					case "checkbox":
+						action = expectedText("{space} toggle · {enter} {next}", { space: keybindings.formatKeyHint("space"), enter: enterHint, next });
+						break;
+					case "radio":
+						action = `${enterHint} ${expectedText(singleField ? "submit" : "choose")}`;
+						break;
+					default:
+						action = `${enterHint} ${next}`;
+				}
+				expect(hints.startsWith(action), `${context} displayed the wrong Enter action`, hints);
+				if (fieldCase.kind === "checkbox" || fieldCase.kind === "radio") {
+					if (!sample.handleNativeEvent || !sample.describe) throw new Error(`${context} lost its native note actions`);
+					// Bare TUI bindings omit app.ask.note; test the note path with the host's in-memory app bindings.
+					const previousBindings = keybindingRegistry.getKeybindings();
+					try {
+						keybindingRegistry.setKeybindings(noteBindings);
+						const noteHints = Bun.stripANSI(sample.keyHints?.() ?? "");
+						expectFixed(noteHints, " · {key} note", noteHints, { key: keybindings.formatKeyHint(noteKey) });
+						const noteButton = actionNode(collectNodes(sample.describe(nativeContext(false))), "note");
+						if (!noteButton || typeof noteButton.key !== "string") throw new Error(`${context} lost its Note button identity`);
+						sample.handleNativeEvent({ type: "action", key: noteButton.key, act: "note", mods: [] });
+						const noteEditor = sample.describe(nativeContext(false));
+						const noteEditorText = collectStrings(noteEditor).join("\n");
+						expectFixed(noteEditorText, "Keep", noteEditorText);
+						expectFixed(noteEditorText, "Save", noteEditorText);
+						const keepButton = actionNode(collectNodes(noteEditor), "cancel");
+						if (!keepButton || typeof keepButton.key !== "string") throw new Error(`${context} lost its Keep button identity`);
+						sample.handleNativeEvent({ type: "action", key: keepButton.key, act: "cancel", mods: [] });
+					} finally {
+						keybindingRegistry.setKeybindings(previousBindings);
+					}
+				}
+				if (fieldCase.kind === "select") {
+					// Type-ahead still searches the original option label, not its translation.
+					sample.handleInput("h");
+					sample.handleInput(" ");
+					const dropdownHints = Bun.stripANSI(sample.keyHints?.() ?? "");
+					sample.handleInput("\r");
+					expectValue(submissions, 0, `${context} submitted while closing its dropdown`, dropdownHints);
+				}
+				sample.handleInput("\r");
+				if (!singleField) {
+					expectValue(submissions, 0, `${context} submitted instead of advancing`, hints);
+					const trailingHints = Bun.stripANSI(sample.keyHints?.() ?? "");
+					expect(trailingHints.startsWith(`${enterHint} ${expectedText("next")}`),
+						`${context} changed the trailing field's Enter action`, trailingHints);
+					sample.handleInput("\r");
+					expectValue(submissions, 0, `${context} skipped its Submit row`, trailingHints);
+					const submitHints = Bun.stripANSI(sample.keyHints?.() ?? "");
+					expect(submitHints.startsWith(`${enterHint} ${expectedText("submit")}`),
+						`${context} changed the Submit row's action`, submitHints);
+					sample.handleInput("\r");
+				}
+				expectValue(submissions, 1, `${context} did not submit exactly once`, hints);
+				expectValue(submitted, { token: "Settings", Settings: fieldCase.value, ...(singleField ? {} : { extra: "id" }) },
+					`${context} translated or changed submitted values`, hints);
+				expectValue(notes, [], `${context} changed option notes`, hints);
+				expect(!cancelled, `${context} unexpectedly cancelled`, hints);
+				sample.dispose();
+			}
+		}
+	}
 }
 
 let approvalApproved = false;

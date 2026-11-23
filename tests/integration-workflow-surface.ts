@@ -1,7 +1,8 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import * as ts from "typescript";
 import { WORKFLOW_MENU_MODULES, WORKFLOW_MENU_TEXT_KEYS } from "../runtime/menu-workflow";
 import type { MenuModule } from "../runtime/menu-catalog";
 
@@ -382,6 +383,19 @@ async function waitFor<T>(promise: Promise<T>, label: string): Promise<T> {
 	}
 }
 
+const displayTranspiler = new Bun.Transpiler({ loader: "ts", target: "bun" });
+
+function compileDisplayFunction<T>(syntax: ts.SourceFile, fragment: string, name: string): T {
+	const helpers = syntax.statements.filter(statement => {
+		if (ts.isFunctionDeclaration(statement)) return statement.name?.text === "__zhompMenuText";
+		return ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration =>
+			ts.isIdentifier(declaration.name) && declaration.name.text === "__zhompMenuTranslations");
+	}).map(statement => statement.getText(syntax)).join("\n");
+	// The selected bodies read controlled data only; host imports and authentication methods are never evaluated.
+	const javascript = displayTranspiler.transformSync(`${helpers}\n${fragment}`);
+	return new Function(`${javascript}\nreturn ${name};`)() as T;
+}
+
 const mode = process.env.MENU_SURFACE_MODE;
 if (mode !== "ordinary" && mode !== "translated" && mode !== "hostile") {
 	throw new Error("MENU_SURFACE_MODE must be ordinary, translated, or hostile");
@@ -421,6 +435,10 @@ try {
 			"Delete Session": hostileCopy("删除标题"),
 			Yes: hostileCopy("确认选项"),
 			No: hostileCopy("确认选项"),
+			Native: hostileCopy("原生待办"),
+			"Keep the todo list in the session only": hostileCopy("会话待办说明"),
+			"Credentials saved to {destination}": `${hostileCopy("凭据保存")} {destination}`,
+			"Credential removed from {source}": `${hostileCopy("凭据移除")} {source}`,
 		});
 		writeFileSync(hostileDictionaryPath, JSON.stringify(dictionary), "utf8");
 	}
@@ -488,6 +506,59 @@ try {
 				transformed.source.includes(expectedPair),
 				`the installed translator must include the workflow text pair for ${module.path}`,
 			);
+		}
+		if (module.path === "src/modes/controllers/selector-controller.ts") {
+			const syntax = ts.createSourceFile(module.path, mode === "ordinary" ? source : transformed.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+			const methods = syntax.statements.flatMap(statement => ts.isClassDeclaration(statement) ? [...statement.members] : [])
+				.filter((member): member is ts.MethodDeclaration => ts.isMethodDeclaration(member));
+			const todoOptions = methods.find(method => method.name.getText(syntax) === "#todoBackendOptions");
+			if (todoOptions?.body) {
+				type TodoOption = { value: string; label: string; description?: string };
+				type TodoBackend = { definition: { label?: string; description?: string } };
+				type TodoContext = { ctx: { session: { extensionRunner?: { getTodoBackends(): ReadonlyMap<string, TodoBackend> } } } };
+				const readOptions = compileDisplayFunction<(this: TodoContext, nativeValue: string) => TodoOption[]>(syntax,
+					`function todoBackendOptions(NATIVE_TODO_BACKEND: string) ${todoOptions.body.getText(syntax)}`, "todoBackendOptions");
+				const nativeValue = "native-backend-raw-value";
+				const backends = new Map<string, TodoBackend>([
+					["extension-native", { definition: { label: "Native", description: "Keep the todo list in the session only" } }],
+					["Native", { definition: { description: "Credentials saved to {destination}" } }],
+				]);
+				const expectedDictionary: Readonly<Record<string, string>> = mode === "ordinary" ? {} : dictionary;
+				const nativeOption: TodoOption = {
+					value: nativeValue,
+					label: formatText("Native", expectedDictionary),
+					description: formatText("Keep the todo list in the session only", expectedDictionary),
+				};
+				deepStrictEqual(readOptions.call({ ctx: { session: { extensionRunner: { getTodoBackends: () => backends } } } }, nativeValue), [
+					nativeOption,
+					{ value: "extension-native", label: "Native", description: "Keep the todo list in the session only" },
+					{ value: "Native", label: "Native", description: "Credentials saved to {destination}" },
+				], "only the built-in todo option may be translated; imported values and colliding extension text must stay raw");
+				deepStrictEqual(readOptions.call({ ctx: { session: {} } }, nativeValue), [nativeOption]);
+				for (const [methodName, key, variable] of [
+					["#handleOAuthLogin", "Credentials saved to {destination}", "destination"],
+					["#handleCredentialLogout", "Credential removed from {source}", "source"],
+				] as const) {
+					const method = methods.find(method => method.name.getText(syntax) === methodName);
+					if (!method?.body) throw new Error(`Missing credential notice scope: ${methodName}`);
+					const expressions: ts.Expression[] = [];
+					function visit(node: ts.Node): void {
+						if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+							ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "theme" && node.expression.name.text === "fg") {
+							const [tone, expression] = node.arguments;
+							if (tone && expression && ts.isStringLiteral(tone) && tone.text === "dim") expressions.push(expression);
+						}
+						ts.forEachChild(node, visit);
+					}
+					visit(method.body);
+					strictEqual(expressions.length, 1, `Expected one pure credential destination notice in ${methodName}`);
+					const expression = expressions[0]!;
+					const notice = compileDisplayFunction<(value: string) => string>(syntax,
+						`function credentialNotice(${variable}: string) { return ${expression.getText(syntax)}; }`, "credentialNotice");
+					const value = "credential-store://Native/$&/{source}?account=raw";
+					strictEqual(notice(value), formatText(key, expectedDictionary, { [variable]: value }), "credential locations must remain uninterpreted display data");
+				}
+			}
 		}
 	}
 	if (unsupportedModules.length > 0 && launch.host.version !== "18.3.2") {

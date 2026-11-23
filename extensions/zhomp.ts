@@ -125,6 +125,14 @@ const SETTING_DESCRIPTION_TEMPLATES: readonly SettingDescriptionTemplate[] = [
 		],
 		captures: ["escape"],
 	},
+	{
+		key: "Usage-limit waits within retry.maxDelayMs are already allowed. Enable this to also wait past that cap when the provider reports a reset time, such as a 5-hour or weekly quota window. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
+		parts: [
+			"Usage-limit waits within retry.maxDelayMs are already allowed. Enable this to also wait past that cap when the provider reports a reset time, such as a 5-hour or weekly quota window. Waits are abortable (",
+			") but also hold subagents, so leave off for unattended runs.",
+		],
+		captures: ["escape"],
+	},
 ];
 
 /** Ignore ANSI SGR only for shape checks; returned captures keep the original bytes. */

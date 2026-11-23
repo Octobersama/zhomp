@@ -3,7 +3,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type * as NodeFs from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import * as ts from "typescript";
 import type { LaunchConfig } from "../runtime/host";
+import type { MenuModule } from "../runtime/menu-catalog";
+import { MANAGEMENT_MENU_MODULES } from "../runtime/menu-management";
 import { parseDictionaryText } from "./dictionary-validation";
 
 interface InstalledHostApi {
@@ -12,6 +15,18 @@ interface InstalledHostApi {
 
 interface InstalledExtensionApi {
 	preparePreloadDisplayTranslations(config: LaunchConfig, configPath: string): Promise<void>;
+}
+
+interface InstalledMenuApi {
+	translateMenuSource(
+		source: string,
+		module: MenuModule,
+		dictionary: Readonly<Record<string, string>>,
+	): { source: string; supported: boolean };
+}
+
+interface InstalledMenuCatalogApi {
+	MENU_MODULES: readonly MenuModule[];
 }
 
 interface Renderable {
@@ -259,6 +274,29 @@ function displayText(surface: string, rendered: string, source: string, suffix =
 	ok(searchable.includes(expected), `${surface} expected ${JSON.stringify(expected)}; rendered ${JSON.stringify(rendered)}`);
 }
 
+function controllerMethod(syntax: ts.SourceFile, name: string): ts.MethodDeclaration | undefined {
+	for (const statement of syntax.statements) {
+		if (!ts.isClassDeclaration(statement)) continue;
+		const method = statement.members.find((member): member is ts.MethodDeclaration =>
+			ts.isMethodDeclaration(member) && ts.isIdentifier(member.name) && member.name.text === name);
+		if (method) return method;
+	}
+	return undefined;
+}
+
+const displayTranspiler = new Bun.Transpiler({ loader: "ts", target: "bun" });
+
+function compileDisplayFunction<T>(syntax: ts.SourceFile, fragment: string, name: string): T {
+	const helpers = syntax.statements.filter(statement => {
+		if (ts.isFunctionDeclaration(statement)) return statement.name?.text === "__zhompMenuText";
+		return ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration =>
+			ts.isIdentifier(declaration.name) && declaration.name.text === "__zhompMenuTranslations");
+	}).map(statement => statement.getText(syntax)).join("\n");
+	// Evaluate only the dictionary helper and selected pure display code, never host imports or business methods.
+	const javascript = displayTranspiler.transformSync(`${helpers}\n${fragment}`);
+	return new Function(`${javascript}\nreturn ${name};`)() as T;
+}
+
 const mode = process.env.MENU_SURFACE_MODE;
 if (mode !== "ordinary" && mode !== "translated" && mode !== "hostile") {
 	throw new Error("MENU_SURFACE_MODE must be ordinary, translated, or hostile");
@@ -285,6 +323,12 @@ const hostileTranslations: Readonly<Record<string, string>> = {
 	"Preparing browser authorization...": `${hostileText}-preparing`,
 	"Attempting to open browser...": `${hostileText}-opening-browser`,
 	"Authorization completed in browser.": `${hostileText}-completed`,
+	"running, pid {pid}": `${hostileText}-pid {pid}`,
+	"shared by {count} sessions": `${hostileText}-sessions {count}`,
+	"Running post-checkout hook…": `${hostileText}-worktree-hook`,
+	"Auto-compacting context": `${hostileText}-auto-compaction`,
+	"Compacting context": `${hostileText}-compaction`,
+	"{verb} in the background": `${hostileText}-background {verb}`,
 	"Agent Hub": `${hostileText}-hub`,
 	"Session info": `${hostileText}-native`,
 	"Session Info": `${hostileText}-ansi`,
@@ -329,6 +373,87 @@ const tuiModulePath = (relativePath: string): string => join(launch.host.tuiDir,
 const agentModulePath = (relativePath: string): string => join(launch.host.packageDir, "src", ...relativePath.split("/"));
 const mcpControllerPath = agentModulePath("modes/controllers/mcp-command-controller.ts");
 const mcpControllerSource = readFileSync(mcpControllerPath, "utf8");
+// These helpers must come from the runtime-selected installation, not the checkout under test.
+const installedMenu = (await import(pathToFileURL(join(installDir, "menu-ui.ts")).href)) as InstalledMenuApi;
+const installedCatalog = (await import(pathToFileURL(join(installDir, "menu-catalog.ts")).href)) as InstalledMenuCatalogApi;
+const displayDictionary = mode === "hostile" ? { ...shippedDictionary, ...hostileTranslations } : shippedDictionary;
+function controllerCopy(key: string, values: Readonly<Record<string, string | number>> = {}): string {
+	const template = mode === "ordinary" ? key : displayDictionary[key];
+	if (template === undefined) throw new Error(`Missing management display translation: ${key}`);
+	return template.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (placeholder, name: string) =>
+		Object.hasOwn(values, name) ? String(values[name]) : placeholder);
+}
+for (const name of ["mcp-command-controller", "command-controller"]) {
+	const path = `src/modes/controllers/${name}.ts`;
+	const module = MANAGEMENT_MENU_MODULES.find(candidate => candidate.path === path);
+	if (!module) throw new Error(`Missing management controller catalog entry: ${path}`);
+	strictEqual(
+		installedCatalog.MENU_MODULES.filter(candidate => candidate.root === module.root && candidate.path === path).length,
+		1,
+		`${path} must have exactly one installed catalog owner`,
+	);
+	const source = name === "mcp-command-controller" ? mcpControllerSource : readFileSync(agentModulePath(`modes/controllers/${name}.ts`), "utf8");
+	const transformed = installedMenu.translateMenuSource(source, module, displayDictionary);
+	ok(transformed.supported, `Unsupported management controller source: ${path}`);
+	const syntax = ts.createSourceFile(path, mode === "ordinary" ? source : transformed.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+	if (name === "mcp-command-controller") {
+		const runtimeFunction = syntax.statements.find((statement): statement is ts.FunctionDeclaration =>
+			ts.isFunctionDeclaration(statement) && statement.name?.text === "describeServerRuntime");
+		if (runtimeFunction) {
+			type RuntimeStatus = { state: string; pid?: number; links: number };
+			const describe = compileDisplayFunction<(runtime?: RuntimeStatus) => string>(syntax, runtimeFunction.getText(syntax), "describeServerRuntime");
+			strictEqual(describe(undefined), "");
+			strictEqual(describe({ state: "running", links: 1 }), "running", "a missing PID must retain the technical state");
+			strictEqual(describe({ state: "stopped", pid: 7123, links: 1 }), "stopped", "non-running states must stay raw");
+			strictEqual(describe({ state: "Native", links: 1 }), "Native", "a fallback state must not use a matching dictionary key");
+			strictEqual(describe({ state: "running", pid: 7123, links: 1 }), controllerCopy("running, pid {pid}", { pid: 7123 }));
+			strictEqual(
+				describe({ state: "running", pid: 0, links: 4 }),
+				`${controllerCopy("running, pid {pid}", { pid: 0 })}, ${controllerCopy("shared by {count} sessions", { count: 4 })}`,
+				"zero is still a present PID, and the sharing count must be preserved",
+			);
+			strictEqual(describe({ state: "running", links: 2 }), `running, ${controllerCopy("shared by {count} sessions", { count: 2 })}`);
+		}
+	}
+	const hook = name === "command-controller" ? controllerMethod(syntax, "runWorktreeHook") : undefined;
+	if (hook?.body) {
+		const loader = hook.body.statements.flatMap(statement => ts.isVariableStatement(statement) ? [...statement.declarationList.declarations] : [])
+			.find(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === "loader");
+		const hookLabel = loader?.initializer && ts.isNewExpression(loader.initializer) ? loader.initializer.arguments?.[3] : undefined;
+		if (!hookLabel) throw new Error("Missing worktree hook loader label");
+		const readHookLabel = compileDisplayFunction<() => string>(syntax,
+			`function hookLabel() { return ${hookLabel.getText(syntax)}; }`, "hookLabel");
+		strictEqual(readHookLabel(), controllerCopy("Running post-checkout hook…"));
+		const compactionBody = controllerMethod(syntax, "executeCompaction")?.body;
+		if (!compactionBody) throw new Error("Missing compaction display scope");
+		const declarations = ["cancelHint", "verb", "label"].map(name => {
+			const statement = compactionBody.statements.find(statement =>
+				ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1 &&
+				statement.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === name));
+			if (!statement) throw new Error(`Missing compaction display declaration: ${name}`);
+			return statement.getText(syntax);
+		});
+		type CompactionCopy = (this: { ctx: { keybindings: object } }, isAuto: boolean, background: boolean,
+			appKey: (bindings: object, action: string) => string) => { label: string; cancelHint: string };
+		const copy = compileDisplayFunction<CompactionCopy>(syntax,
+			`function compactionCopy(isAuto: boolean, background: boolean, appKey: (bindings: object, action: string) => string) {\n${declarations.join("\n")}\nreturn { label, cancelHint };\n}`,
+			"compactionCopy");
+		const keybindings = {};
+		const interruptKey = "Ctrl+Alt+;";
+		for (const isAuto of [false, true]) {
+			for (const background of [false, true]) {
+				const actual = copy.call({ ctx: { keybindings } }, isAuto, background, (bindings, action) => {
+					strictEqual(bindings, keybindings);
+					strictEqual(action, "app.interrupt");
+					return interruptKey;
+				});
+				const verb = controllerCopy(isAuto ? "Auto-compacting context" : "Compacting context");
+				strictEqual(actual.label, background ? controllerCopy("{verb} in the background", { verb }) : verb);
+				strictEqual(actual.cancelHint, `(${interruptKey} ${controllerCopy("to cancel")})`, "the configured interrupt key must stay raw");
+			}
+		}
+	}
+}
 const mcpControllerModule = (await import(
 	pathToFileURL(mcpControllerPath).href
 )) as MCPControllerApi;

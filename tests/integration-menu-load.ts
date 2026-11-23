@@ -64,7 +64,8 @@ deepStrictEqual(syntaxFailures, [], "Generated interface modules must compile be
 if (process.env.MENU_CATALOG_REQUIRE_ALL === "1") {
 	// OMP 19 removed /seance. Keep its adapter and strict presence check for the 18.x host.
 	const expectedAbsent = launch.host.version.startsWith("19.") ? ["agent:src/slash-commands/seance.ts"] : ["tui:src/native/ask-card.ts"];
-	deepStrictEqual(absent, expectedAbsent, "Unexpected catalogued module inventory for this host");
+	if (Bun.semver.satisfies(launch.host.version, "<19.1.0")) expectedAbsent.push("tui:src/tools/shell-steps.ts");
+	deepStrictEqual([...absent].sort(), expectedAbsent.sort(), "Unexpected catalogued module inventory for this host");
 	deepStrictEqual(unsupported, [], `The current adaptation target must accept every exact menu source shape: ${JSON.stringify(sourceFailures)}`);
 }
 

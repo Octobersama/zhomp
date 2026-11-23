@@ -253,14 +253,6 @@ const FORM_DIALOG_CURRENT_PATCHES: readonly DialogMenuPatch[] = [
 	patch('return `${upDown} highlight · ${enter} choose${noteHint} · ${editorKey("tui.select.cancel")} close`;',
 		'return ' + text("{keys} highlight · {enter} choose{note} · {cancel} close", '{ keys: upDown, enter, note: noteHint, cancel: editorKey("tui.select.cancel") }') + ';', 1),
 	patch('if (stop.kind === "submit") action = `${enter} submit`;', 'if (stop.kind === "submit") action = `${enter} ${' + text("submit") + '}`;', 1),
-	patch('else if (stop.kind === "text") action = `${enter} next`;', 'else if (stop.kind === "text") action = `${enter} ${' + text("next") + '}`;', 1),
-	patch('else if (stop.kind === "other") action = `type your own · ${enter} next`;',
-		'else if (stop.kind === "other") action = `${' + text("type your own") + '} · ${enter} ${' + text("next") + '}`;', 1),
-	patch('`${formatKeyHint("space")} open · ${formatKeyHint("left")}/${formatKeyHint("right")} change · ${enter} next`',
-		text("{space} open · {left}/{right} change · {enter} next", '{ space: formatKeyHint("space"), left: formatKeyHint("left"), right: formatKeyHint("right"), enter }'), 1),
-	patch('`${formatKeyHint("space")} toggle · ${enter} next`',
-		text("{space} toggle · {enter} next", '{ space: formatKeyHint("space"), enter }'), 1),
-	patch('`${enter} choose`', '`${enter} ${' + text("choose") + '}`', 1),
 	patch('const hints = [action, `${upDown} move`];',
 		'const hints = [action, ' + text("{keys} move", "{ keys: upDown }") + '];', 1),
 	patch('if (stop.kind !== "submit") hints.push(`${formatKeyHint("tab")} next field`);',
@@ -284,10 +276,38 @@ const FORM_DIALOG_CURRENT_PATCHES: readonly DialogMenuPatch[] = [
 	patch('`Submits these answers in ${this.#remaining}s`', text("Submits these answers in {seconds}s", "{ seconds: this.#remaining }"), 1),
 ];
 
+const FORM_DIALOG_ACTION_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
+	[
+		patch('else if (stop.kind === "text") action = `${enter} next`;', 'else if (stop.kind === "text") action = `${enter} ${' + text("next") + '}`;', 1),
+		patch('else if (stop.kind === "other") action = `type your own · ${enter} next`;',
+			'else if (stop.kind === "other") action = `${' + text("type your own") + '} · ${enter} ${' + text("next") + '}`;', 1),
+		patch('`${formatKeyHint("space")} open · ${formatKeyHint("left")}/${formatKeyHint("right")} change · ${enter} next`',
+			text("{space} open · {left}/{right} change · {enter} next", '{ space: formatKeyHint("space"), left: formatKeyHint("left"), right: formatKeyHint("right"), enter }'), 1),
+		patch('`${formatKeyHint("space")} toggle · ${enter} next`',
+			text("{space} toggle · {enter} next", '{ space: formatKeyHint("space"), enter }'), 1),
+		patch('`${enter} choose`', '`${enter} ${' + text("choose") + '}`', 1),
+	],
+	[
+		patch('const next = this.#sole ? "submit" : "next";',
+			'const next = this.#sole ? ' + text("submit") + ' : ' + text("next") + ';', 1),
+		patch('else if (stop.kind === "other") action = `type your own · ${enter} ${next}`;',
+			'else if (stop.kind === "other") action = `${' + text("type your own") + '} · ${enter} ${next}`;', 1),
+		patch('`${formatKeyHint("space")} open · ${formatKeyHint("left")}/${formatKeyHint("right")} change · ${enter} ${next}`',
+			text("{space} open · {left}/{right} change · {enter} {next}", '{ space: formatKeyHint("space"), left: formatKeyHint("left"), right: formatKeyHint("right"), enter, next }'), 1),
+		patch('`${formatKeyHint("space")} toggle · ${enter} ${next}`',
+			text("{space} toggle · {enter} {next}", '{ space: formatKeyHint("space"), enter, next }'), 1),
+		patch('`${enter} ${this.#sole ? "submit" : "choose"}`',
+			'`${enter} ${this.#sole ? ' + text("submit") + ' : ' + text("choose") + '}`', 1),
+		patch('const noteHint = noteKey ? ` · ${formatKeyHint(noteKey)} note` : "";',
+			'const noteHint = noteKey ? ' + text(" · {key} note", "{ key: formatKeyHint(noteKey) }") + ' : "";', 1),
+	],
+];
+
 const FORM_DIALOG_VARIANTS: readonly (readonly DialogMenuPatch[])[] = [
 	[...FORM_DIALOG_LEGACY_PATCHES, ...FORM_DIALOG_LABEL_VARIANTS[0]!, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
 	[...FORM_DIALOG_LEGACY_PATCHES, ...FORM_DIALOG_LABEL_VARIANTS[1]!, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
-	[...FORM_DIALOG_CURRENT_PATCHES, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
+	[...FORM_DIALOG_CURRENT_PATCHES, ...FORM_DIALOG_ACTION_VARIANTS[0]!, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
+	[...FORM_DIALOG_CURRENT_PATCHES, ...FORM_DIALOG_ACTION_VARIANTS[1]!, ...FORM_DIALOG_SHARED_DISPLAY_PATCHES],
 ];
 
 const FORM_DATA_PATCHES: readonly DialogMenuPatch[] = [
@@ -401,6 +421,7 @@ export const DIALOG_MENU_TEXT_KEYS: readonly string[] = [
 	" · sent only if chosen", "blank removes", "keep", " · {key} note",
 	"{keys} highlight · {enter} choose{note} · {cancel} close", "{space} open · {left}/{right} change · {enter} next",
 	"{space} toggle · {enter} next", "{keys} move", "{key} next field", "{keys} page",
+	"{space} open · {left}/{right} change · {enter} {next}", "{space} toggle · {enter} {next}",
 	"Submits these answers in {seconds}s", "{count} to fix", "Previous/next question  ←/→",
 	"{count} answer needs a fix", "{count} answers need a fix", " · Submit opens the first", "All set · Submit sends these answers",
 	"Add a note to the highlighted answer  {key}", "Add a note to the highlighted answer", "Keep", "Save", "Cancel",

@@ -61,6 +61,21 @@ const SELECTOR_PATCHES: readonly WorkflowMenuPatch[] = [
 	patch('"Resumed session"', '__zhompMenuText("Resumed session")'),
 ];
 
+const SELECTOR_191_PATCHES: readonly WorkflowMenuPatch[] = [
+	patch(
+		'{ value: NATIVE_TODO_BACKEND, label: "Native", description: "Keep the todo list in the session only" }',
+		'{ value: NATIVE_TODO_BACKEND, label: __zhompMenuText("Native"), description: __zhompMenuText("Keep the todo list in the session only") }',
+	),
+	patch(
+		'block.addChild(new Text(theme.fg("dim", `Credentials saved to ${destination}`), 1, 0));',
+		'block.addChild(new Text(theme.fg("dim", __zhompMenuText("Credentials saved to {destination}", { destination })), 1, 0));',
+	),
+	patch(
+		'block.addChild(new Text(theme.fg("dim", `Credential removed from ${source}`), 1, 0));',
+		'block.addChild(new Text(theme.fg("dim", __zhompMenuText("Credential removed from {source}", { source })), 1, 0));',
+	),
+];
+
 const SELECTOR_VARIANTS: readonly (readonly WorkflowMenuPatch[])[] = [
 	[
 		patch(
@@ -91,7 +106,10 @@ const SELECTOR_VARIANTS: readonly (readonly WorkflowMenuPatch[])[] = [
 			'__zhompMenuText("Session directory {directory} is missing or cannot be entered; continuing in {newDirectory}", { directory: shortenPath(recordedCwd), newDirectory: shortenPath(newCwd) })',
 		),
 	],
-];
+].flatMap(variant => [0, 1].map(count => [
+	...variant,
+	...SELECTOR_191_PATCHES.map(patch => ({ ...patch, count })),
+]));
 
 const CONFIRMATION_VARIANTS: readonly (readonly WorkflowMenuPatch[])[] = [
 	[
@@ -155,4 +173,8 @@ export const WORKFLOW_MENU_TEXT_KEYS: readonly string[] = [
 	"Could not move the session out of removed worktree {path}: {error}",
 	"Could not move the session here from missing {path}: {error}",
 	"Session directory {directory} is missing or cannot be entered; continuing in {newDirectory}",
+	"Native",
+	"Keep the todo list in the session only",
+	"Credentials saved to {destination}",
+	"Credential removed from {source}",
 ];

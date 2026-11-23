@@ -547,6 +547,7 @@ async function verifyInstalledConsumers(host: HostPackage, env: NodeJS.ProcessEn
 		for (const probe of probes) {
 			const unavailable = probe.modules
 				.filter(module => !(host.version.startsWith("18.") && module.path === "src/native/ask-card.ts"))
+				.filter(module => !(Bun.semver.satisfies(host.version, "<19.1.0") && module.path === "src/tools/shell-steps.ts"))
 				.map(module => `${module.root}:${module.path}`).filter(path => !supportedPaths.has(path));
 			if (unavailable.length > 0) {
 				// Git's actual terminal/keyboard fallback was already exercised by GitCLI above.

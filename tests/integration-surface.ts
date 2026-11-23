@@ -439,7 +439,10 @@ const getterDescriptionTemplateKeys: Record<string, string | readonly string[]> 
 	doubleEscapeAction: "What pressing {escape} twice with an empty editor does: open the transcript rewind selector, open the session tree, or nothing",
 	"spelling.autocomplete": "Show predicted word completions as inline hints: {tab} accepts with a space, {right} without",
 	"composer.predictions": "After a completed turn, ask the active model to predict your next message and show it as ghost text in the empty composer; {tab} or {right} inserts it without sending. Extra usage: every completed turn sends one more billed request over the whole conversation (counted in /stats)",
-	"retry.waitForUsageReset": "When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
+	"retry.waitForUsageReset": [
+		"When a provider reports usage-limit exhaustion with a reset time (5-hour or weekly quota windows on any provider), sleep until the reset instead of failing fast past retry.maxDelayMs. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
+		"Usage-limit waits within retry.maxDelayMs are already allowed. Enable this to also wait past that cap when the provider reports a reset time, such as a 5-hour or weekly quota window. Waits are abortable ({escape}) but also hold subagents, so leave off for unattended runs.",
+	],
 };
 
 const fallbackEnvNoteTemplate = "Unset, it falls back to ${envName}.";

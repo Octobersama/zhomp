@@ -34,6 +34,8 @@ export const MANAGEMENT_MENU_TEXT_KEYS: readonly string[] = [
 	"Preparing browser authorization...",
 	"Attempting to open browser...",
 	"Authorization completed in browser.",
+	"running, pid {pid}",
+	"shared by {count} sessions",
 	"Agent Hub",
 	"1 Agents",
 	"2 Activity",
@@ -402,6 +404,10 @@ export const MANAGEMENT_MENU_TEXT_KEYS: readonly string[] = [
 	"Memory Injection Payload",
 	"Memory Queue",
 	"{values} ({guidance})", "{tokens} of {contextWindow} tokens",
+	"Running post-checkout hook…",
+	"Auto-compacting context",
+	"Compacting context",
+	"{verb} in the background",
 ];
 
 const patches = (entries: readonly [string, string, number?][]): MenuModule["patches"] =>
@@ -706,6 +712,11 @@ const sessionInfoPatches = patches([
 	['node("kv", { items: [total], layout: "grid", role: "omp.info.total" })', 'node("kv", { items: [{ ...total, k: sentenceCase(sessionInfoField(g.head, total.k) ?? total.k) }], layout: "grid", role: "omp.info.total" })', 1],
 ]);
 
+const mcpRuntimePatches = patches([
+	['runtime.state === "running" && runtime.pid !== undefined ? `running, pid ${runtime.pid}` : runtime.state', 'runtime.state === "running" && runtime.pid !== undefined ? __zhompMenuText("running, pid {pid}", { pid: runtime.pid }) : runtime.state', 1],
+	['if (runtime.links > 1) parts.push(`shared by ${runtime.links} sessions`);', 'if (runtime.links > 1) parts.push(__zhompMenuText("shared by {count} sessions", { count: runtime.links }));', 1],
+]);
+
 const mcpControllerPatches = patches([
 	['this.#showReport("MCP Server Management", helpText);', 'this.#showReport(__zhompMenuText("MCP Server Management"), helpText);', 1],
 	['"Manage Model Context Protocol (MCP) servers for external tool integrations."', '__zhompMenuText("Manage Model Context Protocol (MCP) servers for external tool integrations.")', 1],
@@ -835,6 +846,15 @@ const commandControllerPatches = patches([
 	['this.#showMarkdownPanel("Memory Queue", payload);', 'this.#showMarkdownPanel(__zhompMenuText("Memory Queue"), payload);', 1],
 ]);
 
+const commandController191Patches = patches([
+	['"Running post-checkout hook…",\n\t\t\tgetSymbolTheme().spinnerFrames,', '__zhompMenuText("Running post-checkout hook…"),\n\t\t\tgetSymbolTheme().spinnerFrames,', 1],
+	[
+		'const cancelHint = `(${appKey(this.ctx.keybindings, "app.interrupt")} to cancel)`;\n\t\tconst verb = isAuto ? "Auto-compacting context" : "Compacting context";\n\t\tconst label = background ? `${verb} in the background` : verb;',
+		'const cancelHint = `(${appKey(this.ctx.keybindings, "app.interrupt")} ${__zhompMenuText("to cancel")})`;\n\t\tconst verb = isAuto ? __zhompMenuText("Auto-compacting context") : __zhompMenuText("Compacting context");\n\t\tconst label = background ? __zhompMenuText("{verb} in the background", { verb }) : verb;',
+		1,
+	],
+]);
+
 export const MANAGEMENT_MENU_MODULES: readonly MenuModule[] = [
 	{
 		root: "agent",
@@ -873,7 +893,10 @@ export const MANAGEMENT_MENU_MODULES: readonly MenuModule[] = [
 				['theme.fg("muted", " (/mcp enable <name> connects one anyway):")', 'theme.fg("muted", __zhompMenuText(" (/mcp enable <name> connects one anyway):"))', 1],
 				['theme.fg("warning", " ◌ replaced:")', 'theme.fg("warning", ` ◌ ${__zhompMenuText("replaced:")}`)', 1],
 			]),
-		],
+		].flatMap(variant => [0, 1].map(count => [
+			...variant,
+			...mcpRuntimePatches.map(patch => ({ ...patch, count })),
+		])),
 	},
 	{ root: "tui", path: "src/overlays/mcp-add-wizard.ts", patches: mcpWizardPatches },
 	{ root: "tui", path: "src/overlays/agent-hub.ts", patches: agentHubPatches },
@@ -902,6 +925,9 @@ export const MANAGEMENT_MENU_MODULES: readonly MenuModule[] = [
 				['this.ctx.showWarning("Context usage is unavailable: the model\'s context window is unknown or invalid.")', 'this.ctx.showWarning(__zhompMenuText("Context usage is unavailable: the model\'s context window is unknown or invalid."))'],
 				['theme.fg("dim", "Local:")', 'theme.fg("dim", __zhompMenuText("Local:"))', localFields],
 			])),
-		],
+		].flatMap(variant => [0, 1].map(count => [
+			...variant,
+			...commandController191Patches.map(patch => ({ ...patch, count })),
+		])),
 	},
 ];

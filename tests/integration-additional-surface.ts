@@ -106,6 +106,9 @@ interface JobsJob {
 	status: "running" | "completed" | "failed" | "cancelled";
 	label: string;
 	startTime: number;
+	endTime?: number;
+	intent?: string;
+	caption?: string;
 	ownerId: string;
 	agentId: string;
 }
@@ -116,13 +119,46 @@ interface JobsSnapshot {
 	rootId: string;
 }
 
+interface JobsStream {
+	id: string;
+	kind: "pipe" | "file";
+	producer: string;
+	consumer: string;
+	bytes: number;
+	open: boolean;
+	modified: number;
+	tail(): string | undefined;
+}
+
+interface JobsDetail {
+	command?: string;
+	cwd?: string;
+	pids: readonly number[];
+	exitCode?: number;
+	output?: string;
+	artifactId?: string;
+	streams?: readonly JobsStream[];
+}
+
 interface JobsPanelApi {
 	JobsSheet: new (source: {
 		load(): JobsSnapshot;
-		inspect(id: string): { command?: string; cwd?: string; pids: readonly number[]; exitCode?: number; output?: string; artifactId?: string };
+		inspect(id: string): JobsDetail;
 		close(): void;
 		cancel?(id: string): void;
 	}) => Component;
+}
+
+interface ShellStepsApi {
+	ShellSteps: new () => {
+		select(node: string): void;
+		show(input: { streams: readonly JobsStream[]; output: string; settled: boolean }): {
+			id: string;
+			label: string;
+			note?: string;
+			text: string | undefined;
+		};
+	};
 }
 
 interface ReportPanelApi {
@@ -298,7 +334,7 @@ const roots: Record<MenuModule["root"], string> = { agent: launch.host.packageDi
 const sourceEvidence = dashboardMenuApi.DASHBOARD_MENU_MODULES.map(module => {
 	const sourcePath = join(roots[module.root], ...module.path.split("/"));
 	if (!existsSync(sourcePath)) {
-		unavailable.push(`${module.root}:${module.path}@${launch.host.version}`);
+		if (module.path !== "src/tools/shell-steps.ts") unavailable.push(`${module.root}:${module.path}@${launch.host.version}`);
 		return { id: `${module.root}:${module.path}`, source: "unavailable", sourceSupported: false, registered: false };
 	}
 	const source = readFileSync(sourcePath, "utf8");
@@ -358,6 +394,7 @@ await Promise.resolve();
 const usageOverviewAnsi = ansi(usage);
 const usageOverviewNative = nativeText(usage, nativeContext);
 evidence.usage = { head: usage.nativeOverlay?.head, ansi: usageOverviewAnsi, native: usageOverviewNative };
+assertFixed(usageOverviewAnsi, "Activity", dictionary, "usage dashboard ANSI activity heading");
 if (usageOverviewNative === undefined) unavailable.push(`usage-dashboard.describe@${launch.host.version}`);
 else {
 	assertFixed(usageOverviewNative, "Overview", dictionary, "usage dashboard native overview tabs");
@@ -424,6 +461,39 @@ else assertFixed(loadingUsageNative, "Loading usage history…", dictionary, "us
 assertFixed(loadingUsageAnsi, "Loading usage history…", dictionary, "usage dashboard loading prose");
 if (!finishUsageActivityLoad) throw new Error(`usage dashboard did not request activity data; actual=${JSON.stringify(loadingUsageNative)}`);
 finishUsageActivityLoad();
+
+if (readFileSync(usagePath, "utf8").includes("#staleNote(")) {
+	const today = new Date();
+	const activityDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+	const staleUsageEvidence: unknown[] = [];
+	for (const { error, detail } of [
+		{ error: "Probe sync [raw]\n  interrupted...", detail: "Probe sync [raw] interrupted" },
+		{ error: "...", detail: "" },
+	]) {
+		const staleUsage = new usageApi.UsageDashboardComponent({
+			...usageOptions,
+			loadActivity: async push => {
+				push([{ day: activityDay, cost: 0.25, requests: 7 }]);
+				throw new Error(error);
+			},
+		});
+		await Promise.resolve();
+		const staleAnsi = ansi(staleUsage);
+		const staleNative = nativeText(staleUsage, nativeContext);
+		const key = detail === "" ? "not synced" : "not synced ({detail})";
+		assertFixed(staleAnsi, "Activity", dictionary, "stale usage ANSI activity heading");
+		assertFixed(staleAnsi, key, dictionary, "stale usage ANSI sync failure", { detail });
+		assertCanonical(staleAnsi, "$0.25", "stale usage cached activity");
+		if (staleNative === undefined) unavailable.push(`usage-dashboard.stale.describe@${launch.host.version}`);
+		else {
+			assertFixed(staleNative, key, dictionary, "stale usage native sync failure", { detail });
+			assertCanonical(staleNative, "$0.25", "stale usage cached activity");
+		}
+		staleUsageEvidence.push({ ansi: staleAnsi, native: staleNative });
+		staleUsage.dispose?.();
+	}
+	evidence.staleUsage = staleUsageEvidence;
+}
 await Promise.resolve();
 const resetSummary = usageDisplayApi.summarizeUsageResetCredits({ availableCount: 1, redeemableCount: 0, eligible: false });
 const resetText = resetSummary?.unavailableReason ?? "";
@@ -563,6 +633,88 @@ const pendingJobsNative = nativeText(pendingJobs, nativeContext);
 evidence.pendingJobs = { ansi: ansi(pendingJobs), native: pendingJobsNative };
 if (pendingJobsNative === undefined) unavailable.push(`jobs-panel.no-output.describe@${launch.host.version}`);
 else assertFixed(pendingJobsNative, "No output yet", dictionary, "running job empty output label");
+const settledJob: JobsJob = { ...job, status: "completed", endTime: Date.now() };
+const settledJobs = new jobsApi.JobsSheet({
+	...jobsSource,
+	load: () => ({ running: [], recent: [settledJob], rootId: "root-agent-id" }),
+	inspect: () => ({ pids: [] }),
+});
+const settledJobsNative = nativeText(settledJobs, nativeContext);
+evidence.settledJobs = { ansi: ansi(settledJobs), native: settledJobsNative };
+if (settledJobsNative === undefined) unavailable.push(`jobs-panel.settled.describe@${launch.host.version}`);
+else {
+	assertFixed(settledJobsNative, "Done", dictionary, "settled job status");
+	assertFixed(settledJobsNative, "No output", dictionary, "settled job empty output label");
+}
+strictEqual(settledJob.status, "completed", "settled job status enum must remain canonical");
+settledJobs.dispose?.();
+
+if (readFileSync(jobsPath, "utf8").includes("function emptyOutputNote(")) {
+	const streamCases = [
+		{ id: "file:1", label: "Output", open: true, bytes: 1, contents: undefined, empty: "Binary data" },
+		{ id: "file:2", label: "Step output", open: true, bytes: 0, contents: "", empty: "Nothing written yet" },
+		{ id: "file:3", label: "Following", open: false, bytes: 0, contents: "", empty: "Nothing written" },
+	] as const;
+	const streams: JobsStream[] = streamCases.map((source): JobsStream => ({
+		id: source.id,
+		kind: "file",
+		producer: "echo Probe command [raw]",
+		consumer: source.label,
+		bytes: source.bytes,
+		open: source.open,
+		modified: Date.now(),
+		tail: () => source.contents,
+	}));
+	const streamJob: JobsJob = { ...job, intent: "Output", caption: "Follow live" };
+	const streamJobs = new jobsApi.JobsSheet({
+		...jobsSource,
+		load: () => ({ running: [streamJob], recent: [], rootId: "root-agent-id" }),
+		inspect: () => ({ pids: [], output: "Probe output [raw]", streams }),
+	});
+	const sourcesNative = nativeText(streamJobs, nativeContext);
+	if (sourcesNative === undefined) throw new Error("Jobs output source controls have no native description");
+	for (const key of ["Output", "Output source", "Following", "Shows what the command writes now; click a step of the command to show its output"]) {
+		assertFixed(sourcesNative, key, dictionary, `jobs source control ${key}`);
+	}
+	assertCanonical(sourcesNative, "Output", "job intent matching a translation key");
+	assertCanonical(sourcesNative, "Follow live", "job caption matching a translation key");
+	const selectedSources: unknown[] = [];
+	for (const source of streamCases) {
+		assertContains(sourcesNative, `"label":${JSON.stringify(source.label)}`, "caller output filename matching a translation key");
+		assertContains(sourcesNative, `"id":"source:${source.id}"`, "canonical source action id");
+		streamJobs.handleNativeEvent?.({ type: "action", key: "sources", act: `source:${source.id}`, mods: [] });
+		const selectedNative = nativeText(streamJobs, nativeContext);
+		if (selectedNative === undefined) throw new Error("Selected job source has no native description");
+		assertFixed(selectedNative, source.empty, dictionary, `jobs source empty state ${source.id}`);
+		assertFixed(selectedNative, "Follow live", dictionary, "pinned jobs source follow action");
+		assertFixed(selectedNative, "Show what the command writes now", dictionary, "pinned jobs source follow title");
+		assertContains(selectedNative, '"click":"follow"', "canonical follow action");
+		selectedSources.push({ id: source.id, native: selectedNative });
+	}
+	streamJobs.handleNativeEvent?.({ type: "action", key: "sources", act: "follow", mods: [] });
+	const followingNative = nativeText(streamJobs, nativeContext);
+	if (followingNative === undefined) throw new Error("Following job output has no native description");
+	assertFixed(followingNative, "Following", dictionary, "resumed jobs output follow state");
+	strictEqual(followingNative.includes('"click":"follow"'), false, "follow action must unpin the source");
+	evidence.jobsSources = { sources: sourcesNative, selected: selectedSources, following: followingNative };
+	streamJobs.dispose?.();
+
+	// Use the selected host's module to exercise its preload transform, not a workspace copy.
+	const shellStepsPath = join(launch.host.tuiDir, "src", "tools", "shell-steps.ts");
+	const shellStepsApi = await import(pathToFileURL(shellStepsPath).href) as ShellStepsApi;
+	const steps = new shellStepsApi.ShellSteps();
+	steps.select("0:0:1");
+	const stepView = steps.show({ streams: [], output: "Output", settled: true });
+	strictEqual(stepView.id, "step:0:0:1", "step source id must remain canonical");
+	assertFixed(stepView.label, "Step output", dictionary, "fallback step output label");
+	assertFixed(stepView.note ?? "", "Its own output", dictionary, "fallback step output note");
+	steps.select("0:0:1");
+	const ownView = steps.show({ streams: [], output: "Output", settled: true });
+	strictEqual(ownView.id, "out", "own output source id must remain canonical");
+	assertFixed(ownView.label, "Output", dictionary, "own output source label");
+	strictEqual(ownView.text, "Output", "output content matching a translation key must remain raw");
+	evidence.shellSteps = { step: stepView, own: ownView };
+}
 strictEqual(job.status, "running", "job status enum must remain canonical");
 const emptyJobs = new jobsApi.JobsSheet({ ...jobsSource, load: () => ({ running: [], recent: [], rootId: "root-agent-id" }) });
 const emptyJobsNative = nativeText(emptyJobs, nativeContext);

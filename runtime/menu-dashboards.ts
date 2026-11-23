@@ -10,6 +10,7 @@ const DASHBOARD_MENU_TEXT = [
 	"No limits", "no data", "+{count} more", "untouched: {names}", "No usage data available.",
 	"Usage history unavailable ({detail}).", "Usage history unavailable.", "Loading usage history…", "Activity",
 	"{summary} · last {weeks} weeks", " · syncing…", "Refresh failed: {error}", "Refreshing…", "Updated", "ago",
+	"not synced", "not synced ({detail})", "account {count}", "{label} in {duration}",
 	"Overview", "Details", "Refresh", "Untouched", "No usage data", "No quotas reported",
 	"These providers report no quota windows to track", "No usage yet",
 	"Quotas show here once a signed-in provider reports usage, and the calendar fills in as you work.", "Quotas",
@@ -66,6 +67,9 @@ const DASHBOARD_MENU_TEXT = [
 	"Running", "Done", "Failed", "Cancelled", "{status} · {type} · {id}", "{label}, {status}, {age}", "{count} recent",
 	"Commands and subagent tasks started in the background show up here while they run.", "Agent", "Directory", "PIDs", "PID",
 	"Exit code", "Full output", "Ran for", "Running for", "Cancel job", "Output", "No output", "No output yet",
+	"Binary data", "Nothing written yet", "Nothing written", "Output source", "Following", "Follow live",
+	"Shows what the command writes now; click a step of the command to show its output", "Show what the command writes now",
+	"Step output", "Its own output", "… {count} more command lines", "cwd {path}", "pid {pids}", "exit {code}",
 	"{key} to close", "{keys} scroll · ", "Paused", "P A U S E D", "Main agent, subagents, and advisor hold at their next step.",
 	"In-flight calls finish; nothing new starts until you resume.", "paused for {duration}", "{key} to resume", "Every agent holds",
 	"Main agent, subagents and advisor stop at their next step.", "Running calls finish",
@@ -130,7 +134,6 @@ exact('`Usage history unavailable (${detail}).`', '__zhompMenuText("Usage histor
 literal("Usage history unavailable.", "Usage history unavailable.", 2),
 	literal("Loading usage history…", "Loading usage history…", 2),
 exact('sectionHead("Activity", meta)', 'sectionHead(__zhompMenuText("Activity"), meta)'),
-exact('`${theme.bold(theme.fg("accent", "Activity"))} ${theme.fg("dim", `${formatActivityTotals(layout)} · last ${weeks} weeks`)}${this.#syncing ? theme.fg("dim", " · syncing…") : ""}`', '`${theme.bold(theme.fg("accent", __zhompMenuText("Activity")))} ${theme.fg("dim", __zhompMenuText("{summary} · last {weeks} weeks", { summary: formatActivityTotals(layout), weeks }))}${this.#syncing ? theme.fg("dim", __zhompMenuText(" · syncing…")) : ""}`'),
 	exact('this.#refreshing\n\t\t\t? "refreshing…"', 'this.#refreshing\n\t\t\t? __zhompMenuText("refreshing…")'),
 	exact('const scrollHint = maxScroll > 0 ? `${editorKeys("tui.select.up", "tui.select.down")} scroll · ` : "";', 'const scrollHint = maxScroll > 0 ? __zhompMenuText("{keys} scroll · ", { keys: editorKeys("tui.select.up", "tui.select.down") }) : "";'),
 	exact('this.#options.refresh ? "r refresh · " : ""', 'this.#options.refresh ? __zhompMenuText("r refresh · ") : ""'),
@@ -188,10 +191,10 @@ exact('`${name}: no usage data`', '__zhompMenuText("{name}: no usage data", { na
 		'function localizedUsageLimitTitle(label: string, limit: UsageLimit): string {\n\tif ((label === "Key budget" && limit.id === `${limit.scope.provider}:key:budget`) ||\n\t\t(label === "User budget" && limit.id === `${limit.scope.provider}:user:budget`)) return __zhompMenuText(label);\n\treturn label;\n}\n\nfunction detailWindowLabel(label: string, limit: UsageLimit): string | undefined {'),
 	exact('label: bucket.label,\n\t\t\t\twindowTag:', 'label: localizedUsageLimitTitle(bucket.label, worst),\n\t\t\t\twindowTag:'),
 	exact('bucket = { label, window: detailWindowLabel(label, limit), rows: [] };', 'bucket = { label: localizedUsageLimitTitle(label, limit), window: detailWindowLabel(label, limit), rows: [] };'),
-	exact('`${resets.bankedCount} saved reset${resets.bankedCount === 1 ? "" : "s"}`', '__zhompMenuText(resets.bankedCount === 1 ? "saved reset" : "saved resets", { count: resets.bankedCount })'),
-	exact('` · expires in ${formatDuration(remaining)} (${date})`', '` · ${__zhompMenuText(" · expires in {duration} ({date})", { duration: formatDuration(remaining), date })}`'),
-	exact('` · expired (${date})`', '` · ${__zhompMenuText(" · expired ({date})", { date })}`'),
-	exact('` · unavailable: ${sanitizeDisplayLine(resets.unavailableReason)}`', '` · ${__zhompMenuText(" · unavailable: {reason}", { reason: sanitizeDisplayLine(resets.unavailableReason) })}`'),
+	exact('`${resets.bankedCount} saved reset${resets.bankedCount === 1 ? "" : "s"}`', '`${resets.bankedCount} ${__zhompMenuText(resets.bankedCount === 1 ? "saved reset" : "saved resets")}`'),
+	exact('` · expires in ${formatDuration(remaining)} (${date})`', '__zhompMenuText(" · expires in {duration} ({date})", { duration: formatDuration(remaining), date })'),
+	exact('` · expired (${date})`', '__zhompMenuText(" · expired ({date})", { date })'),
+	exact('` · unavailable: ${sanitizeDisplayLine(resets.unavailableReason)}`', '__zhompMenuText(" · unavailable: {reason}", { reason: sanitizeDisplayLine(resets.unavailableReason) })'),
 ];
 const usageDashboardResetVariants: readonly (readonly MenuPatch[])[] = [
 	[
@@ -221,8 +224,32 @@ const usageDashboardAmountVariants: readonly (readonly MenuPatch[])[] = [
 	],
 ];
 
+const usageDashboardActivityVariants: readonly (readonly MenuPatch[])[] = [
+	[
+		exact('`${theme.bold(theme.fg("accent", "Activity"))} ${theme.fg("dim", `${formatActivityTotals(layout)} · last ${weeks} weeks`)}${this.#syncing ? theme.fg("dim", " · syncing…") : ""}`', '`${theme.bold(theme.fg("accent", __zhompMenuText("Activity")))} ${theme.fg("dim", __zhompMenuText("{summary} · last {weeks} weeks", { summary: formatActivityTotals(layout), weeks }))}${this.#syncing ? theme.fg("dim", __zhompMenuText(" · syncing…")) : ""}`'),
+	],
+	[
+		exact('`${theme.bold(theme.fg("accent", "Activity"))} ${theme.fg("dim", `${formatActivityTotals(layout)} · last ${weeks} weeks`)}${this.#syncing ? theme.fg("dim", " · syncing…") : this.#syncError ? theme.fg("dim", ` · ${this.#staleNote()}`) : ""}`', '`${theme.bold(theme.fg("accent", __zhompMenuText("Activity")))} ${theme.fg("dim", __zhompMenuText("{summary} · last {weeks} weeks", { summary: formatActivityTotals(layout), weeks }))}${this.#syncing ? theme.fg("dim", __zhompMenuText(" · syncing…")) : this.#syncError ? theme.fg("dim", ` · ${this.#staleNote()}`) : ""}`'),
+		exact('return detail ? `not synced (${detail})` : "not synced";', 'return detail ? __zhompMenuText("not synced ({detail})", { detail }) : __zhompMenuText("not synced");'),
+		exact('`account ${index + 1}`', '__zhompMenuText("account {count}", { count: index + 1 })', 2),
+		exact('span(" left", "dim")', 'span(` ${__zhompMenuText("Left")}`, "dim")'),
+		exact('" · expired"', '` · ${__zhompMenuText("expired")}`'),
+		exact('`request${requests === 1 ? "" : "s"}`', '__zhompMenuText(requests === 1 ? "request" : "requests")'),
+		exact('`${entry.accounts} accounts`', '__zhompMenuText("{count} accounts", { count: entry.accounts })', 2),
+		exact('`${resets.redeemableCount} usable now`', '__zhompMenuText("{count} usable now", { count: resets.redeemableCount })'),
+		exact('`unavailable: ${sanitizeDisplayLine(resets.unavailableReasons.join(" • "))}`', '__zhompMenuText("unavailable: {reason}", { reason: sanitizeDisplayLine(resets.unavailableReasons.join(" • ")) })'),
+		exact('`${formatActivityTotals(layout)} · last ${NATIVE_HEATMAP_WEEKS} weeks`', '__zhompMenuText("{summary} · last {weeks} weeks", { summary: formatActivityTotals(layout), weeks: NATIVE_HEATMAP_WEEKS })'),
+		exact('`${point.requests} request${point.requests === 1 ? "" : "s"}`', '`${point.requests} ${__zhompMenuText(point.requests === 1 ? "request" : "requests")}`'),
+		exact('`${sanitizeDisplayLine(account.label)}: no usage data`', '__zhompMenuText("{name}: no usage data", { name: sanitizeDisplayLine(account.label) })'),
+		exact('`Resets · ${reportAccountLabel(report, report.limits[0], index)}`', '`${__zhompMenuText("Resets")} · ${reportAccountLabel(report, report.limits[0], index)}`'),
+		exact('`${limit.window?.resetLabel ?? "resets"} in ${formatDuration(resetsAt - nowMs)}`', '__zhompMenuText("{label} in {duration}", { label: limit.window?.resetLabel ?? __zhompMenuText("resets"), duration: formatDuration(resetsAt - nowMs) })'),
+	],
+];
+
 const usageDashboardVariants = usageDashboardResetVariants.flatMap(resetPatches =>
-	usageDashboardAmountVariants.map(amountPatches => [...resetPatches, ...amountPatches]),
+	usageDashboardAmountVariants.flatMap(amountPatches =>
+		usageDashboardActivityVariants.map(activityPatches => [...resetPatches, ...amountPatches, ...activityPatches]),
+	),
 );
 
 const usageDisplayPatches: readonly MenuPatch[] = [
@@ -377,19 +404,45 @@ const jobsPanelPatches: readonly MenuPatch[] = [
 	exact('{ k: "Full output",', '{ k: __zhompMenuText("Full output"),'),
 	exact('title: settled ? "Ran for" : "Running for"', 'title: settled ? __zhompMenuText("Ran for") : __zhompMenuText("Running for")'),
 	exact('actionButton("Cancel job", "cancel",', 'actionButton(__zhompMenuText("Cancel job"), "cancel",'),
+];
+
+const jobsPanelLegacyOutputPatches: readonly MenuPatch[] = [
 	exact('text("Output",', 'text(__zhompMenuText("Output"),'),
 	exact('text(settled ? "No output" : "No output yet",', 'text(settled ? __zhompMenuText("No output") : __zhompMenuText("No output yet"),'),
 ];
 
 const jobsPanelVariants: readonly (readonly MenuPatch[])[] = [
 	[
+		...jobsPanelLegacyOutputPatches,
 		exact('`${cursor} ${guide}${job.status}  ${job.type} ${age}  ${agent}${collapseCommand(job.label)}`', '`${cursor} ${guide}${__zhompMenuText(STATUS_LABEL[job.status])}  ${job.type} ${age}  ${agent}${collapseCommand(job.label)}`'),
 		exact('aria: `${job.label}, ${status.toLowerCase()}, ${age}`', 'aria: __zhompMenuText("{label}, {status}, {age}", { label: job.label, status: status.toLowerCase(), age })'),
 	],
 	[
+		...jobsPanelLegacyOutputPatches,
 		exact('`${cursor} ${guide}${job.status}  ${job.type} ${age}  ${agent}${title}`', '`${cursor} ${guide}${__zhompMenuText(STATUS_LABEL[job.status])}  ${job.type} ${age}  ${agent}${title}`'),
 		exact('aria: `${job.intent ?? job.label}, ${status.toLowerCase()}, ${age}`', 'aria: __zhompMenuText("{label}, {status}, {age}", { label: job.intent ?? job.label, status: status.toLowerCase(), age })'),
 	],
+	[
+		exact('`${cursor} ${guide}${job.status}  ${job.type} ${age}  ${agent}${title}`', '`${cursor} ${guide}${__zhompMenuText(STATUS_LABEL[job.status])}  ${job.type} ${age}  ${agent}${title}`'),
+		exact('aria: `${jobDisplayLabel(job)}, ${status.toLowerCase()}, ${age}`', 'aria: __zhompMenuText("{label}, {status}, {age}", { label: jobDisplayLabel(job), status: status.toLowerCase(), age })'),
+		exact('`   … ${hidden} more command lines`', '`   ${__zhompMenuText("… {count} more command lines", { count: hidden })}`'),
+		exact('`cwd ${detail.cwd}`', '__zhompMenuText("cwd {path}", { path: detail.cwd })'),
+		exact('`pid ${detail.pids.join(", ")}`', '__zhompMenuText("pid {pids}", { pids: detail.pids.join(", ") })'),
+		exact('`exit ${detail.exitCode}`', '__zhompMenuText("exit {code}", { code: detail.exitCode })'),
+		exact('return "Binary data";', 'return __zhompMenuText("Binary data");'),
+		exact('return shown.open ? "Nothing written yet" : "Nothing written";', 'return shown.open ? __zhompMenuText("Nothing written yet") : __zhompMenuText("Nothing written");'),
+		exact('return settled ? "No output" : "No output yet";', 'return settled ? __zhompMenuText("No output") : __zhompMenuText("No output yet");'),
+		exact('title: "Output source"', 'title: __zhompMenuText("Output source")'),
+		exact('text("Following",', 'text(__zhompMenuText("Following"),'),
+		exact('title: "Shows what the command writes now; click a step of the command to show its output"', 'title: __zhompMenuText("Shows what the command writes now; click a step of the command to show its output")'),
+		exact('quietButton("Follow live", "follow", "Show what the command writes now")', 'quietButton(__zhompMenuText("Follow live"), "follow", __zhompMenuText("Show what the command writes now"))'),
+	],
+];
+
+const shellStepsPatches: readonly MenuPatch[] = [
+	exact('label: "Output"', 'label: __zhompMenuText("Output")', 2),
+	exact('focusText(input.presentation, focus) ?? "Step output"', 'focusText(input.presentation, focus) ?? __zhompMenuText("Step output")'),
+	exact('note: "Its own output"', 'note: __zhompMenuText("Its own output")'),
 ];
 
 const reportPanelPatches: readonly MenuPatch[] = [
@@ -453,6 +506,7 @@ export const DASHBOARD_MENU_MODULES: readonly MenuModule[] = [
 	{ root: "tui", path: "src/overlays/usage-display.ts", patches: usageDisplayPatches },
 	{ root: "tui", path: "src/overlays/advisor-config.ts", patches: advisorConfigPatches },
 	{ root: "tui", path: "src/overlays/jobs-panel.ts", patches: jobsPanelPatches, variants: jobsPanelVariants },
+	{ root: "tui", path: "src/tools/shell-steps.ts", patches: shellStepsPatches },
 	{ root: "tui", path: "src/overlays/report-panel.ts", patches: reportPanelPatches },
 	{ root: "tui", path: "src/overlays/pause-screen.ts", patches: pauseScreenPatches, variants: pauseScreenVariants },
 	{ root: "tui", path: "src/overlays/stats-notice.ts", patches: statsNoticePatches },
